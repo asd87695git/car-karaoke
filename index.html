@@ -621,8 +621,58 @@ h2 .mono { color: var(--accent); }
     return out;
   }
 
+  /* LRCLIB 是免費、沒有金鑰的服務，官方要求：
+     1. 標明是哪個 App（瀏覽器不能改 User-Agent，用 Lrclib-Client）
+     2. 一次一個請求、中間隔 200～500ms
+     3. 被 429 時照 Retry-After 等，不然可能被暫時封鎖
+     但 429 回應沒有 CORS 標頭，瀏覽器只會看到「網路錯誤」、讀不到 Retry-After，
+     所以網路錯誤一律當成被限流：從 2 秒開始加倍退避（最多 60 秒），退避期間這台裝置完全不送。 */
+  var LRC_CLIENT = 'car-karaoke (https://github.com/asd87695git/car-karaoke)';
+  var LRC = { chain: Promise.resolve(), last: 0, until: 0, backoff: 0 };
+  function lrcLimited(ra) {
+    LRC.backoff = ra != null ? ra : Math.min(Math.max(LRC.backoff * 2, 2), 60);
+    LRC.until = Date.now() + LRC.backoff * 1000;
+    var e = new Error('歌詞服務暫時限流，' + Math.ceil(LRC.backoff) + ' 秒後再試');
+    e.retryAfter = LRC.backoff;
+    return e;
+  }
+  function lrcFetch(path) {
+    var job = LRC.chain.then(function () {
+      var wait = Math.max(LRC.until - Date.now(), LRC.last + 300 - Date.now(), 0);
+      return new Promise(function (r) { setTimeout(r, wait); });
+    }).then(function () {
+      LRC.last = Date.now();
+      return fetch('https://lrclib.net' + path, { headers: { 'Lrclib-Client': LRC_CLIENT } }).then(function (r) {
+        if (r.status === 429) {
+          var ra = parseInt(r.headers.get('Retry-After'), 10);
+          throw lrcLimited(isNaN(ra) ? null : ra);
+        }
+        LRC.backoff = 0;
+        if (r.status === 404) return null;
+        if (!r.ok) throw new Error('歌詞服務錯誤（' + r.status + '）');
+        return r.json();
+      }, function () { throw lrcLimited(null); });
+    });
+    LRC.chain = job.catch(function () {});
+    return job;
+  }
+  function lrcSearch(params) {
+    return lrcFetch('/api/search?' + new URLSearchParams(params)).then(function (res) { return res || []; });
+  }
+  // 同一份歌詞（主機手動選的、乘客跟唱抓的）記在記憶體，不重複抓
+  var lrcCache = {}, lrcCacheIds = [], lrcPending = {};
   function lrcGet(id) {
-    return fetch('https://lrclib.net/api/get/' + encodeURIComponent(id)).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+    if (lrcCache[id]) return Promise.resolve(lrcCache[id]);
+    if (lrcPending[id]) return lrcPending[id]; // 同一份正在抓，共用同一個請求
+    var job = lrcPending[id] = lrcFetch('/api/get/' + encodeURIComponent(id)).then(function (rec) {
+      delete lrcPending[id];
+      if (rec) {
+        lrcCache[id] = rec; lrcCacheIds.push(id);
+        if (lrcCacheIds.length > 40) delete lrcCache[lrcCacheIds.shift()];
+      }
+      return rec;
+    }, function (err) { delete lrcPending[id]; throw err; });
+    return job;
   }
 
   // 目前該亮第幾行（-1 = 第一句之前）
@@ -1606,13 +1656,6 @@ h2 .mono { color: var(--accent); }
       setSrc('');
     }
 
-    function lrcSearch(params) {
-      return fetch('https://lrclib.net/api/search?' + new URLSearchParams(params)).then(function (r) {
-        if (!r.ok) throw new Error('lrclib ' + r.status);
-        return r.json();
-      });
-    }
-
     var JUNK = /(official\s*(music\s*|live\s*|lyrics?\s*)?video|official\s*(mv|audio)|(music|live|lyrics?)\s*video|官方完整版|官方版|官方\s*MV|完整版\s*MV|高畫質|動態歌詞|歌詞版|\bM\/?V\b|\bHD\b|\b4K\b)/gi;
     function cleanTitle(t) {
       return String(t)
@@ -1671,29 +1714,40 @@ h2 .mono { color: var(--accent); }
               if (diff < bestDiff) { bestDiff = diff; best = r; }
             } else if (r.plainLyrics && !plainFallback) plainFallback = r;
           });
-        }).catch(function () { failed++; }).then(function () { return step(i + 1); });
+        }).catch(function (err) {
+          failed++;
+          if (err && err.retryAfter != null) throw err; // 被限流：剩下的查詢先不送
+        }).then(function () { return step(i + 1); });
       }
       return step(0);
     }
 
     var lyrRetry = { vid: null, n: 0 };
+    var lyrCache = {}, lyrCacheIds = []; // 影片 id → 找到的歌詞，同一首再播不用重找
+    function cacheLyrics(vid, rec) {
+      if (!lyrCache[vid]) { lyrCacheIds.push(vid); if (lyrCacheIds.length > 30) delete lyrCache[lyrCacheIds.shift()]; }
+      lyrCache[vid] = rec;
+    }
     function loadLyrics() {
       var now = S.now;
       if (!now || !ready) return;
       if (lyrRetry.vid !== now.id) lyrRetry = { vid: now.id, n: 0 };
       L.vid = now.id;
+      if (lyrCache[now.id]) { applyLyrics(lyrCache[now.id]); return; }
       setSrc('找歌詞中…');
       var d = (player.getVideoData && player.getVideoData()) || {};
       var title = d.title || now.title, author = d.author || now.ch || '';
       var dur = player.getDuration ? player.getDuration() : 0;
       var p = picks[now.id] ? lrcGet(picks[now.id]) : Promise.resolve(null);
       p.then(function (rec) { return rec || findLyrics(title, author, dur); })
-        .then(function (rec) { if (L.vid === now.id) applyLyrics(rec); })
-        .catch(function () {
+        .then(function (rec) { if (rec) cacheLyrics(now.id, rec); if (L.vid === now.id) applyLyrics(rec); })
+        .catch(function (err) {
           if (L.vid !== now.id) return;
           // 重試期間 L.rid 維持 null（乘客那邊顯示「主機正在找」），全部失敗才告訴乘客沒有歌詞
-          if (lyrRetry.n >= 3) { setSrc('歌詞服務連不上'); showMsg('歌詞服務暫時連不上，可以按下方「歌詞不對？」手動找'); L.rid = 0; broadcastSoon(); return; }
-          var wait = [8, 20, 45][lyrRetry.n++];
+          if (lyrRetry.n >= 4) { setSrc('歌詞服務連不上'); showMsg('歌詞服務暫時連不上，可以按下方「歌詞不對？」手動找'); L.rid = 0; broadcastSoon(); return; }
+          // 被限流就照退避時間（多等 1 秒），其他錯誤用固定間隔
+          var wait = err && err.retryAfter != null ? Math.ceil(err.retryAfter) + 1 : [8, 20, 45, 60][lyrRetry.n];
+          lyrRetry.n++;
           setSrc('歌詞服務連不上，' + wait + ' 秒後重試');
           showMsg('歌詞服務暫時連不上，' + wait + ' 秒後自動重試…');
           setTimeout(function () { if (S.now && S.now.id === now.id && L.vid === now.id && !L.lines.length) loadLyrics(); }, wait * 1000);
@@ -1810,6 +1864,7 @@ h2 .mono { color: var(--accent); }
             onclick: function () {
               if (!S.now) return;
               picks[S.now.id] = r.id; store.set('lyrPicks', picks);
+              cacheLyrics(S.now.id, r);
               L.vid = S.now.id;
               applyLyrics(r);
               $('#lyrModal').hidden = true;
@@ -1818,7 +1873,7 @@ h2 .mono { color: var(--accent); }
             el('span', { class: 'lq-t' }, r.trackName),
             el('span', { class: 'lq-a' }, r.artistName + ' · ' + fmtTime(r.duration) + (r.syncedLyrics ? ' · 同步' : ' · 純文字')));
         }));
-      }).catch(function () { box.replaceChildren(el('p', { class: 'hint bad' }, '歌詞服務連不上，等一下再試')); });
+      }).catch(function (err) { box.replaceChildren(el('p', { class: 'hint bad' }, err && err.retryAfter != null ? err.message : '歌詞服務連不上，等一下再試')); });
     });
 
     /* ----- 初始畫面 ----- */
@@ -1931,16 +1986,10 @@ h2 .mono { color: var(--accent); }
       gLoad(y.l, 0);
     }
 
-    // 和 iPad 共用熱點時，LRCLIB 可能因為同一個 IP 剛查過而暫時限流，失敗就隔幾秒重試
-    var RETRY = [2000, 5000, 10000, 20000];
+    // 和 iPad 共用熱點時，LRCLIB 可能因為同一個 IP 剛查過而暫時限流，照退避時間重試
     function gLoad(lid, attempt) {
       lrcGet(lid).then(function (rec) {
         if (G.lid !== lid) return;
-        if (!rec && attempt < RETRY.length) {
-          gMsg('歌詞暫時載不到，' + Math.round(RETRY[attempt] / 1000) + ' 秒後重試…');
-          setTimeout(function () { if (G.lid === lid) gLoad(lid, attempt + 1); }, RETRY[attempt]);
-          return;
-        }
         if (rec && rec.syncedLyrics) {
           G.lines = parseLRC(rec.syncedLyrics); G.idx = -2;
           $('#gTrack').replaceChildren.apply($('#gTrack'), G.lines.map(lyricLine));
@@ -1954,9 +2003,18 @@ h2 .mono { color: var(--accent); }
           $('#gPlain').hidden = false;
           $('#gSingSrc').textContent = '只有純文字歌詞';
         } else {
+          gClear('找不到這份歌詞');
+        }
+      }, function (err) {
+        if (G.lid !== lid) return;
+        if (attempt >= 6) {
           gClear('歌詞載入失敗，下一首或主機有動作時會再試');
           G.lid = undefined; // 下一次廣播時重抓
+          return;
         }
+        var wait = (err && err.retryAfter != null ? err.retryAfter : 5) + 0.5;
+        gMsg('歌詞暫時載不到，' + Math.ceil(wait) + ' 秒後重試…');
+        setTimeout(function () { if (G.lid === lid) gLoad(lid, attempt + 1); }, wait * 1000);
       });
     }
 
