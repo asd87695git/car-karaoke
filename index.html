@@ -96,7 +96,7 @@ h2 .mono { color: var(--accent); }
 }
 .line {
   font: 900 var(--lyric-size)/1.3 var(--font-lyric);
-  padding: .16em 0; opacity: .26; color: var(--fg);
+  padding: .16em 0; opacity: .26; color: var(--lc, var(--fg));
   transition: opacity .3s ease;
   overflow-wrap: anywhere;
 }
@@ -107,8 +107,18 @@ h2 .mono { color: var(--accent); }
 .line.gap { color: var(--muted); }
 .line.cur {
   opacity: 1; color: transparent;
-  background: linear-gradient(90deg, var(--accent) 0 calc(var(--p, 0) * 100%), var(--fg) calc(var(--p, 0) * 100%) 100%);
+  background: linear-gradient(90deg, var(--lf, var(--accent)) 0 calc(var(--p, 0) * 100%), var(--lc, var(--fg)) calc(var(--p, 0) * 100%) 100%);
   -webkit-background-clip: text; background-clip: text;
+}
+/* 對唱：LRC 標了「男：」「女：」「合：」的段落 */
+.line.role-m { --lc: #a9d4ff; --lf: #4fb0ff; }
+.line.role-f { --lc: #ffbfd3; --lf: #ff6b9d; }
+.line.role-d { --lc: #d6c6ff; --lf: #a585ff; }
+/* 前奏／間奏倒數 */
+.cue {
+  position: absolute; z-index: 2; top: 20%; left: max(clamp(24px, 4vw, 64px), env(safe-area-inset-left, 0px));
+  padding: 6px 14px; border-radius: 999px; background: var(--chip); color: var(--accent);
+  font: 700 clamp(16px, 2vw, 24px)/1.2 var(--font-mono); letter-spacing: .12em; pointer-events: none;
 }
 .msg { font: 700 clamp(20px, 2.6vw, 34px)/1.4 var(--font-ui); color: var(--muted); padding-top: 30vh; }
 .plain {
@@ -149,7 +159,11 @@ h2 .mono { color: var(--accent); }
 }
 .player { aspect-ratio: 16 / 9; max-width: 100%; background: #000; border-radius: 10px; overflow: hidden; flex: none; }
 .player iframe, .player #yt { width: 100%; height: 100%; display: block; border: 0; }
-.transport { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.transport { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 8px; }
+.seek { display: flex; align-items: center; gap: 8px; font: 500 12px var(--font-mono); color: var(--muted); margin-top: -12px; }
+.seek input { flex: 1; min-width: 0; accent-color: var(--accent); }
+.fx { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.fx button { min-height: 40px; padding: 4px 2px; font-size: 13px; }
 .block { display: flex; flex-direction: column; gap: 10px; }
 .queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; counter-reset: q; }
 .queue li { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); counter-increment: q; }
@@ -234,6 +248,9 @@ h2 .mono { color: var(--accent); }
 .g-now .label { font-size: 12px; color: var(--accent); font-weight: 700; letter-spacing: .08em; }
 .g-now .title { font-size: 18px; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
 .g-now .by { font-size: 13px; color: var(--muted); }
+.g-ctl { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.g-ctl button { min-height: 46px; }
+.queue li.mine .q-title { color: var(--accent); }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field label { font-size: 13px; color: var(--muted); }
 
@@ -268,8 +285,9 @@ h2 .mono { color: var(--accent); }
       <div class="idle" id="idle">
         <div class="qr" id="qrBig"></div>
         <p>掃描就能點歌</p>
-        <span class="hint">也可以在右邊直接搜尋，或從「我的最愛」點</span>
+        <span class="hint">也可以在左邊直接搜尋，或從「我的最愛」點</span>
       </div>
+      <div class="cue" id="cue" hidden></div>
       <button class="startover" id="startBtn" type="button" hidden>▶ 點一下開始播放</button>
     </div>
     <footer class="stage-foot">
@@ -286,9 +304,16 @@ h2 .mono { color: var(--accent); }
   <aside class="rack">
     <div class="player"><div id="yt"></div></div>
     <div class="transport">
+      <button id="restartBtn" type="button">⏮ 重唱</button>
       <button id="playBtn" class="primary" type="button">▶ 播放</button>
       <button id="nextBtn" type="button">下一首 ⏭</button>
     </div>
+    <div class="seek">
+      <span id="seekCur">0:00</span>
+      <input id="seekBar" type="range" min="0" max="0" step="1" value="0" aria-label="播放進度" disabled>
+      <span id="seekDur">0:00</span>
+    </div>
+    <div class="fx" id="fxRow"></div>
 
     <section class="block">
       <h2>待播 <span id="qCount" class="mono"></span></h2>
@@ -371,6 +396,12 @@ h2 .mono { color: var(--accent); }
     </div>
     <button id="gFavNow" class="star" type="button" hidden>☆</button>
   </div>
+  <div class="g-ctl" id="gCtl" hidden>
+    <button id="gRestart" type="button">⏮ 重唱</button>
+    <button id="gPlay" type="button">⏸ 暫停</button>
+    <button id="gNext" type="button">⏭ 切歌</button>
+  </div>
+  <div class="fx" id="gFx"></div>
   <div id="gPicker" class="picker"></div>
   <section class="block">
     <h2>待播 <span id="gCount" class="mono"></span></h2>
@@ -433,6 +464,14 @@ h2 .mono { color: var(--accent); }
     crypto.getRandomValues(a);
     for (var i = 0; i < n; i++) out += chars[a[i] % chars.length];
     return out;
+  }
+
+  function fmtAgo(ms) {
+    var m = Math.round((Date.now() - ms) / 60000);
+    if (m < 1) return '剛剛';
+    if (m < 60) return m + ' 分鐘前';
+    if (m < 1440) return Math.round(m / 60) + ' 小時前';
+    return Math.round(m / 1440) + ' 天前';
   }
 
   function fmtTime(sec) {
@@ -536,6 +575,123 @@ h2 .mono { color: var(--accent); }
     return Promise.all(ids.map(function (id) {
       return fetchMeta(id).then(function (m) { return { id: id, title: m.title, ch: m.ch, thumb: thumbOf(id) }; });
     }));
+  }
+
+  /* ---------- 氣氛音效（Web Audio 即時合成，不用音檔） ---------- */
+  var FX = [
+    { k: 'clap', label: '👏 掌聲' },
+    { k: 'cheer', label: '🎉 登登' },
+    { k: 'drum', label: '🥁 鼓聲' },
+    { k: 'horn', label: '📯 喇叭' }
+  ];
+  function fxLabel(k) { for (var i = 0; i < FX.length; i++) if (FX[i].k === k) return FX[i].label; return ''; }
+  var actx = null, noiseBuf = null;
+  // iOS 要在使用者點擊時建立／恢復 AudioContext，之後遠端觸發的音效才放得出來
+  function audioCtx() {
+    if (!actx) {
+      var C = window.AudioContext || window.webkitAudioContext;
+      if (!C) return null;
+      actx = new C();
+      noiseBuf = actx.createBuffer(1, actx.sampleRate * 2, actx.sampleRate);
+      var d = noiseBuf.getChannelData(0);
+      for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    if (actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  function env(g, t, peak, attack, decay) {
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+  }
+  function noiseHit(ac, out, t, type, freq, peak, decay) {
+    var src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+    src.buffer = noiseBuf;
+    f.type = type; f.frequency.value = freq; f.Q.value = 0.8;
+    env(g, t, peak, 0.003, decay);
+    src.connect(f); f.connect(g); g.connect(out);
+    src.start(t, Math.random() * 0.5, decay + 0.05);
+  }
+  function tone(ac, out, t, type, f0, f1, peak, dur) {
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    env(g, t, peak, 0.01, dur);
+    o.connect(g); g.connect(out);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  var lastFx = 0;
+  function playFx(k) {
+    var ac = audioCtx();
+    if (!ac || !fxLabel(k) || Date.now() - lastFx < 700) return false;
+    lastFx = Date.now();
+    if (ac.state === 'running') synthFx(ac, k);
+    else ac.resume().then(function () { synthFx(ac, k); }, function () {});
+    return true;
+  }
+  function synthFx(ac, k) {
+    var out = ac.createGain(), t = ac.currentTime + 0.02, i;
+    out.gain.value = 0.8; out.connect(ac.destination);
+    if (k === 'clap') {
+      for (i = 0; i < 70; i++) {
+        var at = t + Math.pow(Math.random(), 1.6) * 2.6;
+        noiseHit(ac, out, at, 'bandpass', 900 + Math.random() * 1600, 0.25 + Math.random() * 0.35, 0.06 + Math.random() * 0.05);
+      }
+    } else if (k === 'drum') {
+      tone(ac, out, t, 'sine', 220, 80, 0.9, 0.18);            // ba
+      noiseHit(ac, out, t, 'bandpass', 1800, 0.35, 0.12);
+      tone(ac, out, t + 0.2, 'sine', 160, 60, 0.9, 0.22);      // dum
+      noiseHit(ac, out, t + 0.45, 'highpass', 7000, 0.5, 1.2); // tss
+    } else if (k === 'horn') {
+      [[0, 0.32], [0.42, 0.32], [0.84, 0.9]].forEach(function (b) {
+        [329.6, 415.3, 493.9].forEach(function (f) {
+          var o = ac.createOscillator(), lp = ac.createBiquadFilter(), g = ac.createGain();
+          o.type = 'sawtooth'; o.frequency.value = f;
+          lp.type = 'lowpass'; lp.frequency.value = 2400;
+          g.gain.setValueAtTime(0.0001, t + b[0]);
+          g.gain.exponentialRampToValueAtTime(0.16, t + b[0] + 0.02);
+          g.gain.setValueAtTime(0.16, t + b[0] + b[1] - 0.04);
+          g.gain.exponentialRampToValueAtTime(0.0001, t + b[0] + b[1]);
+          o.connect(lp); lp.connect(g); g.connect(out);
+          o.start(t + b[0]); o.stop(t + b[0] + b[1] + 0.05);
+        });
+      });
+    } else if (k === 'cheer') {
+      [523.3, 659.3, 784, 1046.5].forEach(function (f, j) { tone(ac, out, t + j * 0.11, 'triangle', f, f, 0.35, 0.18); });
+      [523.3, 659.3, 784, 1046.5].forEach(function (f) { tone(ac, out, t + 0.48, 'triangle', f, f, 0.22, 0.9); });
+    }
+  }
+
+  /* ---------- 唱過／點過的歌（存在這台裝置） ---------- */
+  function makeHist(key) {
+    var map = store.get(key, {});
+    if (!map || typeof map !== 'object' || Array.isArray(map)) map = {};
+    var subs = [];
+    return {
+      add: function (it) {
+        if (!it || !it.id) return;
+        var r = map[it.id] || { id: it.id, n: 0 };
+        r.title = String(it.title || r.title || '').slice(0, 120);
+        r.ch = String(it.ch || r.ch || '').slice(0, 60);
+        r.n++; r.last = Date.now();
+        map[it.id] = r;
+        var ids = Object.keys(map);
+        if (ids.length > 300) {
+          ids.sort(function (a, b) { return map[a].last - map[b].last; }).slice(0, ids.length - 300).forEach(function (id) { delete map[id]; });
+        }
+        store.set(key, map);
+        subs.forEach(function (f) { f(); });
+      },
+      list: function (sort) {
+        var arr = Object.keys(map).map(function (id) { return map[id]; });
+        arr.sort(sort === 'top'
+          ? function (a, b) { return b.n - a.n || b.last - a.last; }
+          : function (a, b) { return b.last - a.last; });
+        return arr.slice(0, 30);
+      },
+      on: function (f) { subs.push(f); }
+    };
   }
 
   /* ---------- 我的最愛（存在這台裝置） ---------- */
@@ -644,6 +800,8 @@ h2 .mono { color: var(--accent); }
     var favCount = el('span', { class: 'mono' });
     var tabSearch = el('button', { type: 'button', role: 'tab', class: 'tab' }, '搜尋點歌');
     var tabFav = el('button', { type: 'button', role: 'tab', class: 'tab' }, '我的最愛', favCount);
+    var hist = opts.hist, histSort = 'recent';
+    var tabHist = hist ? el('button', { type: 'button', role: 'tab', class: 'tab' }, opts.histLabel || '唱過') : null;
     var input = el('input', { type: 'search', id: opts.prefix + 'Input', enterkeyhint: 'search', 'aria-label': '搜尋歌名或貼上 YouTube 連結' });
     var form = el('form', { class: 'search', autocomplete: 'off' }, input, el('button', { type: 'submit', class: opts.primary ? 'primary' : null }, '找'));
     var hint = el('p', { class: 'hint' });
@@ -651,7 +809,7 @@ h2 .mono { color: var(--accent); }
     var tools = el('div', { class: 'fav-tools' });
     var list = el('div', { class: 'results' });
     var bar = el('div', { class: 'actionbar', hidden: '' });
-    root.replaceChildren(el('div', { class: 'tabs', role: 'tablist' }, tabSearch, tabFav), searchPane, tools, list, bar);
+    root.replaceChildren(el('div', { class: 'tabs', role: 'tablist' }, tabSearch, tabFav, tabHist), searchPane, tools, list, bar);
 
     function setPlaceholder() {
       input.placeholder = opts.key() ? '搜尋歌名，或貼一個或多個連結' : '貼上一個或多個 YouTube 連結';
@@ -660,6 +818,7 @@ h2 .mono { color: var(--accent); }
 
     tabSearch.addEventListener('click', function () { mode = 'search'; sel = {}; render(); });
     tabFav.addEventListener('click', function () { mode = 'fav'; sel = {}; render(); });
+    if (tabHist) tabHist.addEventListener('click', function () { mode = 'hist'; sel = {}; render(); });
 
     form.addEventListener('submit', function (e) {
       e.preventDefault();
@@ -749,7 +908,7 @@ h2 .mono { color: var(--accent); }
         renderBar();
       });
       var side;
-      if (mode === 'search') {
+      if (mode !== 'fav') {
         var on = Favs.has(it.id);
         side = el('button', { type: 'button', class: 'star' + (on ? ' on' : ''), 'aria-pressed': String(on), 'aria-label': (on ? '從我的最愛移除「' : '收藏「') + it.title + '」' }, on ? '★' : '☆');
         side.addEventListener('click', function () { toast(Favs.toggle(it) ? '已加入我的最愛' : '已從我的最愛移除'); });
@@ -763,7 +922,7 @@ h2 .mono { color: var(--accent); }
         cb,
         el('label', { for: cbId, class: 'r-label' },
           el('img', { src: it.thumb || thumbOf(it.id), alt: '', loading: 'lazy' }),
-          el('span', { class: 'r-meta' }, el('span', { class: 'r-title' }, it.title), el('span', { class: 'r-ch' }, it.ch || ''))),
+          el('span', { class: 'r-meta' }, el('span', { class: 'r-title' }, it.title), el('span', { class: 'r-ch' }, it.sub || it.ch || ''))),
         side, add);
     }
 
@@ -776,7 +935,7 @@ h2 .mono { color: var(--accent); }
         el('span', { class: 'bar-n' }, '已選 ' + n + ' 首'),
         el('button', { type: 'button', class: 'primary', onclick: function () { send(items); } }, '點這 ' + n + ' 首')
       ];
-      if (mode === 'search') {
+      if (mode !== 'fav') {
         kids.push(el('button', { type: 'button', onclick: function () {
           sel = {};
           var c = Favs.add(items);
@@ -798,9 +957,14 @@ h2 .mono { color: var(--accent); }
       favCount.textContent = favs.length ? String(favs.length) : '';
       tabSearch.setAttribute('aria-selected', String(mode === 'search'));
       tabFav.setAttribute('aria-selected', String(mode === 'fav'));
+      if (tabHist) tabHist.setAttribute('aria-selected', String(mode === 'hist'));
       searchPane.hidden = mode !== 'search';
-      tools.hidden = mode !== 'fav' || !favs.length;
-      var items = mode === 'search' ? results : favs;
+      tools.hidden = mode === 'search' || (mode === 'fav' && !favs.length);
+      var histItems = mode === 'hist' ? hist.list(histSort).map(function (r) {
+        var when = histSort === 'top' ? r.n + ' 次' : fmtAgo(r.last);
+        return { id: r.id, title: r.title, ch: r.ch, sub: [r.ch, when].filter(Boolean).join(' · ') };
+      }) : [];
+      var items = mode === 'search' ? results : mode === 'hist' ? histItems : favs;
       var extra = mode === 'search' ? recs : [];
       var valid = {};
       items.concat(extra).forEach(function (it) { valid[it.id] = 1; });
@@ -816,9 +980,16 @@ h2 .mono { color: var(--accent); }
           } }, allSel ? '取消全選' : '全選'),
           el('button', { type: 'button', onclick: function () { send(shuffledFavs(5)); } }, '隨機點 5 首'),
           el('button', { type: 'button', onclick: openIO }, '備份／匯入'));
+      } else if (mode === 'hist') {
+        tools.replaceChildren.apply(tools, [['recent', '最近'], ['top', '最常']].map(function (o) {
+          return el('button', { type: 'button', class: histSort === o[0] ? 'primary' : null, 'aria-pressed': String(histSort === o[0]),
+            onclick: function () { histSort = o[0]; sel = {}; render(); } }, o[1]);
+        }));
       }
 
-      if (mode === 'fav' && !favs.length) {
+      if (mode === 'hist' && !items.length) {
+        list.replaceChildren(el('p', { class: 'hint empty-fav' }, opts.histEmpty || '還沒有紀錄'));
+      } else if (mode === 'fav' && !favs.length) {
         list.replaceChildren(
           el('p', { class: 'hint empty-fav' }, '還沒有收藏。搜尋結果按 ☆，或在正在播放的歌名旁按 ☆，就能把常唱的歌存起來。'),
           el('div', { class: 'fav-tools' }, el('button', { type: 'button', onclick: openIO }, '一次貼上多個連結')));
@@ -829,6 +1000,7 @@ h2 .mono { color: var(--accent); }
     }
 
     Favs.on(render);
+    if (hist) hist.on(function () { if (mode === 'hist') render(); });
     render();
     return { refreshKey: setPlaceholder };
   }
@@ -922,13 +1094,15 @@ h2 .mono { color: var(--accent); }
     var seenList = store.get('seenRids', []), seen = {};
     if (!Array.isArray(seenList)) seenList = [];
     seenList.forEach(function (r) { seen[r] = 1; });
-    var player = null, ready = false, pstate = -1;
+    var player = null, ready = false, pstate = -1, playing = false;
     var L = { vid: null, lines: [], idx: -2 };
 
     $('#apiKey').value = apiKey;
 
+    var histPlayed = makeHist('histPlayed');
     var picker = mountPicker($('#hPicker'), {
       prefix: 'h',
+      hist: histPlayed, histLabel: '唱過', histEmpty: '還沒有唱過的歌，播過的歌會記在這裡。',
       key: function () { return apiKey; },
       onAdd: function (items) {
         items.forEach(function (it) { addSong({ id: it.id, title: it.title, ch: it.ch || '', by: '' }); });
@@ -1016,16 +1190,26 @@ h2 .mono { color: var(--accent); }
         var c = store.get('reqCursor', null);
         if (!c || c.topic !== topic || raw0.time > c.t) store.set('reqCursor', { topic: topic, t: raw0.time });
       }
-      if (!m || m.type !== 'add' || !m.rid || seen[m.rid]) return;
+      if (!m || !m.rid || seen[m.rid]) return;
       seen[m.rid] = 1;
       var by = String(m.by || '').slice(0, 12);
+      if (m.type !== 'add') {
+        markSeen(m.rid);
+        // 遙控和音效只認 20 秒內送出的，避免重連補收時把舊指令又執行一次
+        var fresh = !raw0 || !raw0.time || Date.now() / 1000 - raw0.time < 20;
+        if (m.type === 'ctl' && fresh) onRemote(m, by);
+        else if (m.type === 'fx' && fresh) { if (playFx(m.fx)) toast((by || '有人') + ' ' + fxLabel(m.fx)); }
+        else if (m.type === 'del') onWithdraw(m, by);
+        return;
+      }
       var raw = Array.isArray(m.items) ? m.items : [{ id: m.id, title: m.title, ch: m.ch }];
-      Promise.all(raw.slice(0, MAX_BATCH).map(function (x) {
+      Promise.all(raw.slice(0, MAX_BATCH).map(function (x, j) {
         var id = parseVideoId(x && x.id);
         if (!id) return null;
         var title = String(x.title || '').slice(0, 120), ch = String(x.ch || '').slice(0, 60);
         return (title ? Promise.resolve({ title: title, ch: ch }) : fetchMeta(id)).then(function (meta) {
-          return { id: id, title: meta.title, ch: meta.ch, by: by };
+          // k：乘客端能自己算出來的項目代碼（rid 前 5 碼＋批次內序號），撤回時用
+          return { id: id, title: meta.title, ch: meta.ch, by: by, k: m.rid.slice(0, 5) + j.toString(36) };
         });
       })).then(function (songs) {
         markSeen(m.rid);
@@ -1034,6 +1218,28 @@ h2 .mono { color: var(--accent); }
         songs.forEach(addSong);
         toast((by || '有人') + (songs.length > 1 ? ' 點了 ' + songs.length + ' 首' : ' 點了「' + songs[0].title + '」'));
       });
+    }
+
+    // 乘客手機遙控；vid 對不上代表別人已經切過了，就不再切一次
+    function onRemote(m, by) {
+      var who = by || '有人';
+      if ((m.act === 'next' || m.act === 'restart') && (!S.now || m.vid !== S.now.id)) return;
+      if (m.act === 'next') { toast(who + ' 切歌了'); next(); }
+      else if (m.act === 'restart') { if (restart()) toast(who + ' 要重唱這首'); }
+      else if (m.act === 'pause') { if (ready && pstate === 1) { player.pauseVideo(); toast(who + ' 按了暫停'); } }
+      else if (m.act === 'play') { if (ready && S.now && pstate !== 1) { player.playVideo(); toast(who + ' 按了播放'); } }
+    }
+
+    function onWithdraw(m, by) {
+      if (!m.k) return;
+      for (var i = 0; i < S.queue.length; i++) {
+        if (S.queue[i].k === m.k) {
+          var x = S.queue.splice(i, 1)[0];
+          changed();
+          toast((by || '有人') + ' 撤回了「' + x.title + '」');
+          return;
+        }
+      }
     }
 
     /* ----- 佇列 ----- */
@@ -1073,6 +1279,7 @@ h2 .mono { color: var(--accent); }
     });
 
     function remember(it) {
+      if (!it.auto) histPlayed.add(it);
       played.push({ id: it.id, title: it.title, ch: it.ch || '', auto: !!it.auto });
       if (played.length > 60) played = played.slice(-60);
       store.set('played', played);
@@ -1158,12 +1365,12 @@ h2 .mono { color: var(--accent); }
       }).then(function () { bc.busy = false; scheduleBc(); });
     }
     function buildState() {
-      var slim = function (it) { return { t: String(it.title).slice(0, 48), b: it.by || '', a: it.auto ? 1 : undefined }; };
+      var slim = function (it) { return { t: String(it.title).slice(0, 48), b: it.by || '', a: it.auto ? 1 : undefined, k: it.k }; };
       var q = S.queue.slice(0, 20).map(slim), payload;
       var nowSlim = S.now ? { t: String(S.now.title).slice(0, 80), b: S.now.by || '', a: S.now.auto ? 1 : undefined, i: S.now.id, c: String(S.now.ch || '').slice(0, 40) } : null;
       var enc = new TextEncoder();
       while (true) {
-        payload = { type: 'state', now: nowSlim, q: q, n: S.queue.length, ts: Date.now() };
+        payload = { type: 'state', now: nowSlim, q: q, n: S.queue.length, p: playing ? 1 : 0, ts: Date.now() };
         if (enc.encode(JSON.stringify(payload)).length < 3600 || !q.length) break;
         q = q.slice(0, -2);
       }
@@ -1184,6 +1391,9 @@ h2 .mono { color: var(--accent); }
           onStateChange: function (e) {
             pstate = e.data;
             updatePlayBtn();
+            // 只在播放／暫停切換時廣播（緩衝中不算），讓乘客的暫停鍵顯示對的字
+            var p = e.data === 1 ? true : e.data === 2 || e.data === 0 || e.data === 5 ? false : playing;
+            if (p !== playing) { playing = p; broadcastSoon(); }
             if (e.data === 0) next();
             if (e.data === 1) {
               $('#startBtn').hidden = true;
@@ -1223,6 +1433,36 @@ h2 .mono { color: var(--accent); }
       else if (S.queue.length) next();
       else toast('待播清單是空的，先點一首吧');
     });
+    function restart() {
+      if (!ready || !S.now) return false;
+      player.seekTo(0, true);
+      player.playVideo();
+      return true;
+    }
+    $('#restartBtn').addEventListener('click', function () { if (!restart()) toast('還沒有播放中的歌'); });
+
+    var seeking = false;
+    $('#seekBar').addEventListener('input', function () { seeking = true; $('#seekCur').textContent = fmtTime(+this.value); });
+    $('#seekBar').addEventListener('change', function () {
+      seeking = false;
+      if (ready && S.now) player.seekTo(+this.value, true);
+    });
+    setInterval(function () {
+      var bar = $('#seekBar');
+      var on = ready && S.now && player.getDuration && player.getDuration() > 0;
+      bar.disabled = !on;
+      if (!on) { bar.max = 0; bar.value = 0; $('#seekCur').textContent = '0:00'; $('#seekDur').textContent = '0:00'; return; }
+      if (seeking) return;
+      var d = Math.floor(player.getDuration()), c = Math.floor(player.getCurrentTime() || 0);
+      bar.max = d; bar.value = c;
+      $('#seekCur').textContent = fmtTime(c); $('#seekDur').textContent = fmtTime(d);
+    }, 500);
+
+    $('#fxRow').replaceChildren.apply($('#fxRow'), FX.map(function (f) {
+      return el('button', { type: 'button', onclick: function () { playFx(f.k); } }, f.label);
+    }));
+    document.addEventListener('click', audioCtx, true);
+
     $('#nextBtn').addEventListener('click', function () {
       if (!S.now && !S.queue.length) { toast('沒有下一首了'); return; }
       next();
@@ -1263,7 +1503,16 @@ h2 .mono { color: var(--accent); }
     /* ----- 歌詞：LRCLIB ----- */
     function setSrc(s) { $('#lyrSrc').textContent = s; }
 
+    var cueLast = '';
+    function setCue(text) {
+      if (text === cueLast) return;
+      cueLast = text;
+      $('#cue').textContent = text;
+      $('#cue').hidden = !text;
+    }
+
     function resetLyrics() {
+      setCue('');
       L.vid = null; L.lines = []; L.idx = -2;
       var track = $('#track');
       track.replaceChildren(); track.hidden = false; track.style.transform = '';
@@ -1341,14 +1590,22 @@ h2 .mono { color: var(--accent); }
       return step(0);
     }
 
+    // 對唱標記：行首的「男：」「女：」「合：」「(男)」「M:」「F:」…，之後的行沿用到下一個標記為止
+    var ROLE_RE = /^(?:[(（【\[]\s*(男女|男|女|合)\s*[)）】\]]|(男女|男|女|合|M|F|D|Both)\s*[:：])\s*/i;
+    function roleOf(tag) {
+      tag = tag.toUpperCase();
+      return tag === '男' || tag === 'M' ? 'm' : tag === '女' || tag === 'F' ? 'f' : 'd';
+    }
     function parseLRC(s) {
-      var out = [];
+      var out = [], role = '';
       String(s).split(/\r?\n/).forEach(function (raw) {
         var re = /\[(\d+):(\d+(?:\.\d+)?)\]/g, m, tags = [];
         while ((m = re.exec(raw))) tags.push(+m[1] * 60 + +m[2]);
         if (!tags.length) return;
         var text = raw.replace(/\[[^\]]*\]/g, '').trim();
-        tags.forEach(function (t) { out.push({ t: t, text: text }); });
+        var rm = text.match(ROLE_RE);
+        if (rm) { role = roleOf(rm[1] || rm[2]); text = text.slice(rm[0].length).trim(); }
+        tags.forEach(function (t) { out.push({ t: t, text: text, role: text ? role : '' }); });
       });
       out.sort(function (a, b) { return a.t - b.t; });
       return out;
@@ -1382,9 +1639,10 @@ h2 .mono { color: var(--accent); }
         L.lines = parseLRC(rec.syncedLyrics); L.idx = -2;
         track.hidden = false; plain.hidden = true;
         track.replaceChildren.apply(track, L.lines.map(function (l) {
-          return el('div', { class: 'line' + (l.text ? '' : ' gap') }, l.text || '♪');
+          return el('div', { class: 'line' + (l.text ? '' : ' gap') + (l.role ? ' role-' + l.role : '') }, l.text || '♪');
         }));
         var src = rec.trackName + ' · ' + rec.artistName;
+        if (L.lines.some(function (l) { return l.role; })) src += ' · 對唱：藍男、粉女、紫合';
         if (rec._diff > 12) src += ' · 長度差 ' + Math.round(rec._diff) + ' 秒，可能要調時間';
         setSrc(src);
         setIdx(-1);
@@ -1429,13 +1687,25 @@ h2 .mono { color: var(--accent); }
       if (rep !== lastRep) { lastRep = rep; lastAt = nowMs; }
       return rep + (pstate === 1 ? Math.min((nowMs - lastAt) / 1000, 0.6) : 0);
     }
+    // KTV 式倒數：前奏、空白行（間奏）或同一句停太久時，顯示離下一句還有多久，最後 3 秒變成 ●●●
+    function updateCue(i, t) {
+      var nx = L.lines[i + 1], cur = L.lines[i];
+      if (!nx) { setCue(''); return; }
+      var from = cur ? cur.t : 0, rem = nx.t - t;
+      var waiting = !cur || !cur.text || t - cur.t > 6;
+      if (!waiting || nx.t - from < 4 || rem <= 0) { setCue(''); return; }
+      if (rem <= 3) setCue(new Array(Math.ceil(rem) + 1).join('●'));
+      else setCue((cur ? '間奏 ' : '前奏 ') + fmtTime(Math.ceil(rem)));
+    }
+
     function tick() {
       requestAnimationFrame(tick);
-      if (!ready || !L.lines.length || !player || !player.getCurrentTime || !S.now || L.vid !== S.now.id) return;
+      if (!ready || !L.lines.length || !player || !player.getCurrentTime || !S.now || L.vid !== S.now.id) { if (cueLast) setCue(''); return; }
       var t = playTime() + (offsets[S.now.id] || 0) + LEAD;
       var lo = 0, hi = L.lines.length - 1, i = -1;
       while (lo <= hi) { var mid = (lo + hi) >> 1; if (L.lines[mid].t <= t) { i = mid; lo = mid + 1; } else hi = mid - 1; }
       if (i !== L.idx) setIdx(i);
+      updateCue(i, t);
       if (i >= 0) {
         var cur = L.lines[i], nx = L.lines[i + 1];
         var span = nx ? Math.max(nx.t - cur.t, 0.3) : 4;
@@ -1506,12 +1776,62 @@ h2 .mono { color: var(--accent); }
     $('#gName').value = store.get('name', '');
     $('#gName').addEventListener('input', function () { store.set('name', this.value.trim()); });
 
-    var nowItem = null;
+    var nowItem = null, hostPlaying = false;
     var paintFavNow = starButton($('#gFavNow'), function () { return nowItem; });
+    var histSent = makeHist('histSent');
+    // 自己點的歌的項目代碼（主機用 rid 前 5 碼＋批次序號標記），用來顯示「撤回」
+    var myKeys = store.get('myKeys', []);
+    if (!Array.isArray(myKeys)) myKeys = [];
+    var lastState = null;
 
-    ntfySub(topic + '-st', 'latest', function (m) {
-      if (!m || m.type !== 'state') return;
+    function sendMsg(obj) {
+      obj.rid = randId(12);
+      obj.by = $('#gName').value.trim().slice(0, 12);
+      return ntfyPub(topic + '-req', obj);
+    }
+
+    /* ----- 遙控主機 ----- */
+    $('#gRestart').addEventListener('click', function () {
+      if (!nowItem) return;
+      sendMsg({ type: 'ctl', act: 'restart', vid: nowItem.id }).then(function () { toast('已請主機重唱這首'); }, function (e) { toast(e.message); });
+    });
+    $('#gPlay').addEventListener('click', function () {
+      if (!nowItem) return;
+      var act = hostPlaying ? 'pause' : 'play';
+      sendMsg({ type: 'ctl', act: act, vid: nowItem.id }).then(function () { toast(act === 'pause' ? '已請主機暫停' : '已請主機播放'); }, function (e) { toast(e.message); });
+    });
+    var armNext = false, armNextTimer;
+    $('#gNext').addEventListener('click', function () {
+      var btn = this;
+      if (!nowItem) return;
+      if (!armNext) {
+        armNext = true; btn.textContent = '再按一次';
+        armNextTimer = setTimeout(function () { armNext = false; btn.textContent = '⏭ 切歌'; }, 3000);
+        return;
+      }
+      clearTimeout(armNextTimer); armNext = false; btn.textContent = '⏭ 切歌';
+      sendMsg({ type: 'ctl', act: 'next', vid: nowItem.id }).then(function () { toast('已請主機切歌'); }, function (e) { toast(e.message); });
+    });
+
+    var lastFxSent = 0;
+    $('#gFx').replaceChildren.apply($('#gFx'), FX.map(function (f) {
+      return el('button', { type: 'button', onclick: function () {
+        if (Date.now() - lastFxSent < 1500) return; // 省一點中繼服務的額度
+        lastFxSent = Date.now();
+        sendMsg({ type: 'fx', fx: f.k }).then(function () { toast('已送出 ' + f.label); }, function (e) { toast(e.message); });
+      } }, f.label);
+    }));
+
+    function withdraw(it, li) {
+      li.style.opacity = '.4';
+      sendMsg({ type: 'del', k: it.k }).then(function () { toast('已撤回「' + it.t + '」'); }, function (e) { li.style.opacity = ''; toast(e.message); });
+    }
+
+    function renderState(m) {
       nowItem = m.now && m.now.i ? { id: m.now.i, title: m.now.t, ch: m.now.c || '' } : null;
+      hostPlaying = !!m.p;
+      $('#gCtl').hidden = !nowItem;
+      $('#gPlay').textContent = hostPlaying ? '⏸ 暫停' : '▶ 播放';
       paintFavNow();
       $('#gNowTitle').textContent = m.now ? m.now.t : '目前沒有歌，點第一首吧';
       $('#gNowBy').textContent = !m.now ? '' : m.now.b ? m.now.b + ' 點的' : m.now.a ? '自動推薦' : '';
@@ -1520,10 +1840,19 @@ h2 .mono { color: var(--accent); }
       $('#gCount').textContent = m.n ? String(m.n) : '';
       if (!q.length) { ol.replaceChildren(el('li', { class: 'empty' }, '待播清單是空的')); return; }
       var items = q.map(function (it) {
-        return el('li', {}, el('div', { class: 'q-meta' }, el('div', { class: 'q-title' }, it.t), el('div', { class: 'q-by' }, it.b ? it.b + ' 點的' : it.a ? '自動推薦' : '')));
+        var mine = it.k && myKeys.indexOf(it.k) !== -1;
+        var li = el('li', { class: mine ? 'mine' : null }, el('div', { class: 'q-meta' }, el('div', { class: 'q-title' }, it.t), el('div', { class: 'q-by' }, it.b ? it.b + ' 點的' : it.a ? '自動推薦' : '')));
+        if (mine) li.append(el('div', { class: 'q-act' }, el('button', { type: 'button', onclick: function () { withdraw(it, li); } }, '撤回')));
+        return li;
       });
       if (m.n > q.length) items.push(el('li', { class: 'empty' }, '還有 ' + (m.n - q.length) + ' 首'));
       ol.replaceChildren.apply(ol, items);
+    }
+
+    ntfySub(topic + '-st', 'latest', function (m) {
+      if (!m || m.type !== 'state') return;
+      lastState = m;
+      renderState(m);
     }, function (ok) {
       $('#gConn').textContent = ok ? '已連上' : '重新連線中…';
     });
@@ -1541,12 +1870,21 @@ h2 .mono { color: var(--accent); }
       });
       if (cur.length) chunks.push(cur);
       return chunks.reduce(function (p, chunk) {
-        return p.then(function () { return ntfyPub(topic + '-req', { type: 'add', rid: randId(12), by: by, items: chunk }); });
+        return p.then(function () {
+          var rid = randId(12);
+          return ntfyPub(topic + '-req', { type: 'add', rid: rid, by: by, items: chunk }).then(function () {
+            chunk.forEach(function (x, j) { myKeys.push(rid.slice(0, 5) + j.toString(36)); histSent.add(x); });
+            if (myKeys.length > 150) myKeys = myKeys.slice(-150);
+            store.set('myKeys', myKeys);
+            if (lastState) renderState(lastState);
+          });
+        });
       }, Promise.resolve());
     }
 
     mountPicker($('#gPicker'), {
       prefix: 'g', primary: true,
+      hist: histSent, histLabel: '點過', histEmpty: '還沒有點過歌，在這支手機點過的歌會記在這裡。',
       key: function () { return key; },
       onAdd: onAdd
     });
