@@ -182,6 +182,8 @@ h2 .mono { color: var(--accent); }
 .link-row input { font: 500 12px var(--font-mono); color: var(--muted); }
 .settings summary { cursor: pointer; font-size: 13px; font-weight: 700; letter-spacing: .08em; color: var(--muted); min-height: 32px; }
 .settings label { font-size: 14px; font-weight: 500; }
+.settings h2 { margin-top: 6px; }
+.conn-badge { margin-left: 8px; font-weight: 500; letter-spacing: 0; color: var(--bad); }
 .settings .check { display: flex; align-items: center; gap: 10px; min-height: 36px; cursor: pointer; }
 .settings .check input { width: 22px; height: 22px; margin: 0; flex: none; accent-color: var(--accent); }
 
@@ -339,7 +341,8 @@ h2 .mono { color: var(--accent); }
       <div id="hPicker" class="picker"></div>
     </section>
 
-    <section class="block">
+    <details class="block settings">
+      <summary>設定 <span class="conn-badge" id="connBadge" hidden>點歌通道重新連線中…</span></summary>
       <h2>乘客點歌</h2>
       <div class="qr-row">
         <div class="qr" id="qrSmall"></div>
@@ -349,10 +352,6 @@ h2 .mono { color: var(--accent); }
         <input id="joinLink" readonly aria-label="點歌連結">
         <button id="copyLink" type="button">複製</button>
       </div>
-    </section>
-
-    <details class="block settings">
-      <summary>設定</summary>
       <label for="apiKey">YouTube Data API 金鑰</label>
       <input id="apiKey" type="text" autocomplete="off" spellcheck="false" placeholder="AIza…">
       <p class="hint">沒填就只能貼連結點歌。金鑰會一起放進 QR Code 讓乘客搜尋，請在 Google Cloud 把金鑰限制成只能從這個網址使用。</p>
@@ -1247,6 +1246,7 @@ h2 .mono { color: var(--accent); }
         var c = $('#connState');
         c.textContent = ok ? '點歌通道已連線。乘客用手機相機掃描就能點歌。' : '點歌通道重新連線中…';
         c.classList.toggle('bad', !ok);
+        $('#connBadge').hidden = ok; // 設定收合時也看得到斷線
       });
     }
     subscribe();
@@ -1691,8 +1691,8 @@ h2 .mono { color: var(--accent); }
         .then(function (rec) { if (L.vid === now.id) applyLyrics(rec); })
         .catch(function () {
           if (L.vid !== now.id) return;
-          L.rid = 0; broadcastSoon();
-          if (lyrRetry.n >= 3) { setSrc('歌詞服務連不上'); showMsg('歌詞服務暫時連不上，可以按下方「歌詞不對？」手動找'); return; }
+          // 重試期間 L.rid 維持 null（乘客那邊顯示「主機正在找」），全部失敗才告訴乘客沒有歌詞
+          if (lyrRetry.n >= 3) { setSrc('歌詞服務連不上'); showMsg('歌詞服務暫時連不上，可以按下方「歌詞不對？」手動找'); L.rid = 0; broadcastSoon(); return; }
           var wait = [8, 20, 45][lyrRetry.n++];
           setSrc('歌詞服務連不上，' + wait + ' 秒後重試');
           showMsg('歌詞服務暫時連不上，' + wait + ' 秒後自動重試…');
