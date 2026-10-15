@@ -248,6 +248,20 @@ h2 .mono { color: var(--accent); }
 .g-now .label { font-size: 12px; color: var(--accent); font-weight: 700; letter-spacing: .08em; }
 .g-now .title { font-size: 18px; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
 .g-now .by { font-size: 13px; color: var(--muted); }
+.sing summary { cursor: pointer; font-size: 13px; font-weight: 700; letter-spacing: .08em; color: var(--muted); min-height: 32px; display: flex; gap: 8px; align-items: center; }
+.sing summary .hint { font-weight: 500; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sing-box {
+  --lyric-size: clamp(20px, 5.6vw, 28px);
+  position: relative; height: 38vh; min-height: 220px; overflow: hidden; margin-top: 8px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  -webkit-mask-image: linear-gradient(transparent, #000 12%, #000 85%, transparent);
+  mask-image: linear-gradient(transparent, #000 12%, #000 85%, transparent);
+}
+.sing-box .track { padding: 0 16px; }
+.sing-box .line { cursor: default; }
+.sing-box .cue { top: 16%; left: 16px; font-size: 14px; }
+.sing-box .plain { padding: 16px; font-size: 18px; }
+.sing-msg { position: absolute; inset: 0; margin: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 16px; }
 .g-ctl { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .g-ctl button { min-height: 46px; }
 .queue li.mine .q-title { color: var(--accent); }
@@ -402,6 +416,15 @@ h2 .mono { color: var(--accent); }
     <button id="gNext" type="button">⏭ 切歌</button>
   </div>
   <div class="fx" id="gFx"></div>
+  <details class="block sing" id="gSing" open>
+    <summary>跟唱歌詞 <span class="hint" id="gSingSrc"></span></summary>
+    <div class="sing-box" id="gSingBox">
+      <div class="track" id="gTrack"></div>
+      <div class="plain" id="gPlain" hidden></div>
+      <div class="cue" id="gCue" hidden></div>
+      <p class="hint sing-msg" id="gSingMsg">等待主機播放…</p>
+    </div>
+  </details>
   <div id="gPicker" class="picker"></div>
   <section class="block">
     <h2>待播 <span id="gCount" class="mono"></span></h2>
@@ -575,6 +598,54 @@ h2 .mono { color: var(--accent); }
     return Promise.all(ids.map(function (id) {
       return fetchMeta(id).then(function (m) { return { id: id, title: m.title, ch: m.ch, thumb: thumbOf(id) }; });
     }));
+  }
+
+  /* ---------- 歌詞（主機與乘客跟唱共用） ---------- */
+  // 對唱標記：行首的「男：」「女：」「合：」「(男)」「M:」「F:」…，之後的行沿用到下一個標記為止
+  var ROLE_RE = /^(?:[(（【\[]\s*(男女|男|女|合)\s*[)）】\]]|(男女|男|女|合|M|F|D|Both)\s*[:：])\s*/i;
+  function roleOf(tag) {
+    tag = tag.toUpperCase();
+    return tag === '男' || tag === 'M' ? 'm' : tag === '女' || tag === 'F' ? 'f' : 'd';
+  }
+  function parseLRC(s) {
+    var out = [], role = '';
+    String(s).split(/\r?\n/).forEach(function (raw) {
+      var re = /\[(\d+):(\d+(?:\.\d+)?)\]/g, m, tags = [];
+      while ((m = re.exec(raw))) tags.push(+m[1] * 60 + +m[2]);
+      if (!tags.length) return;
+      var text = raw.replace(/\[[^\]]*\]/g, '').trim();
+      var rm = text.match(ROLE_RE);
+      if (rm) { role = roleOf(rm[1] || rm[2]); text = text.slice(rm[0].length).trim(); }
+      tags.forEach(function (t) { out.push({ t: t, text: text, role: text ? role : '' }); });
+    });
+    out.sort(function (a, b) { return a.t - b.t; });
+    return out;
+  }
+
+  function lrcGet(id) {
+    return fetch('https://lrclib.net/api/get/' + encodeURIComponent(id)).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+  }
+
+  // 目前該亮第幾行（-1 = 第一句之前）
+  function lineAt(lines, t) {
+    var lo = 0, hi = lines.length - 1, i = -1;
+    while (lo <= hi) { var mid = (lo + hi) >> 1; if (lines[mid].t <= t) { i = mid; lo = mid + 1; } else hi = mid - 1; }
+    return i;
+  }
+
+  // KTV 式倒數：前奏、空白行（間奏）或同一句停太久時，顯示離下一句還有多久，最後 3 秒變成 ●●●
+  function cueText(lines, i, t) {
+    var nx = lines[i + 1], cur = lines[i];
+    if (!nx) return '';
+    var from = cur ? cur.t : 0, rem = nx.t - t;
+    var waiting = !cur || !cur.text || t - cur.t > 6;
+    if (!waiting || nx.t - from < 4 || rem <= 0) return '';
+    if (rem <= 3) return new Array(Math.ceil(rem) + 1).join('●');
+    return (cur ? '間奏 ' : '前奏 ') + fmtTime(Math.ceil(rem));
+  }
+
+  function lyricLine(l) {
+    return el('div', { class: 'line' + (l.text ? '' : ' gap') + (l.role ? ' role-' + l.role : '') }, l.text || '♪');
   }
 
   /* ---------- 氣氛音效（Web Audio 即時合成，不用音檔） ---------- */
@@ -1095,7 +1166,8 @@ h2 .mono { color: var(--accent); }
     if (!Array.isArray(seenList)) seenList = [];
     seenList.forEach(function (r) { seen[r] = 1; });
     var player = null, ready = false, pstate = -1, playing = false;
-    var L = { vid: null, lines: [], idx: -2 };
+    // rid：目前歌詞在 LRCLIB 的 id（null = 還在找，0 = 沒有），廣播給乘客跟唱用
+    var L = { vid: null, lines: [], idx: -2, rid: null };
 
     $('#apiKey').value = apiKey;
 
@@ -1348,7 +1420,7 @@ h2 .mono { color: var(--accent); }
     function broadcastSoon() { bc.dirty = true; scheduleBc(); }
     function scheduleBc() {
       if (bc.timer || bc.busy || !bc.dirty) return;
-      bc.timer = setTimeout(flushBc, Math.max(800, bc.last + bc.gap - Date.now()));
+      bc.timer = setTimeout(flushBc, Math.max(1500, bc.last + bc.gap - Date.now()));
     }
     function flushBc() {
       bc.timer = null;
@@ -1368,9 +1440,18 @@ h2 .mono { color: var(--accent); }
       var slim = function (it) { return { t: String(it.title).slice(0, 48), b: it.by || '', a: it.auto ? 1 : undefined, k: it.k }; };
       var q = S.queue.slice(0, 20).map(slim), payload;
       var nowSlim = S.now ? { t: String(S.now.title).slice(0, 80), b: S.now.by || '', a: S.now.auto ? 1 : undefined, i: S.now.id, c: String(S.now.ch || '').slice(0, 40) } : null;
+      // 跟唱同步：v 影片、l 歌詞 id、o 偏移、at 送出當下播到的秒數、ts 送出時間、p 是否播放中
+      var sync = S.now ? {
+        v: S.now.id,
+        l: L.vid === S.now.id ? L.rid : null,
+        o: offsets[S.now.id] || 0,
+        at: ready && player.getCurrentTime ? Math.round((player.getCurrentTime() || 0) * 100) / 100 : 0,
+        ts: Date.now(),
+        p: playing ? 1 : 0
+      } : null;
       var enc = new TextEncoder();
       while (true) {
-        payload = { type: 'state', now: nowSlim, q: q, n: S.queue.length, p: playing ? 1 : 0, ts: Date.now() };
+        payload = { type: 'state', now: nowSlim, q: q, n: S.queue.length, p: playing ? 1 : 0, y: sync, ts: Date.now() };
         if (enc.encode(JSON.stringify(payload)).length < 3600 || !q.length) break;
         q = q.slice(0, -2);
       }
@@ -1389,11 +1470,13 @@ h2 .mono { color: var(--accent); }
             else if (S.queue.length) { next(); }
           },
           onStateChange: function (e) {
+            var prev = pstate;
             pstate = e.data;
             updatePlayBtn();
-            // 只在播放／暫停切換時廣播（緩衝中不算），讓乘客的暫停鍵顯示對的字
+            // 緩衝中不改「播放中」旗標；進入播放（含緩衝結束、拖進度後）或暫停時廣播，
+            // 讓乘客的暫停鍵顯示對的字、跟唱時間重新校正
             var p = e.data === 1 ? true : e.data === 2 || e.data === 0 || e.data === 5 ? false : playing;
-            if (p !== playing) { playing = p; broadcastSoon(); }
+            if (p !== playing || (e.data === 1 && prev !== 1)) { playing = p; broadcastSoon(); }
             if (e.data === 0) next();
             if (e.data === 1) {
               $('#startBtn').hidden = true;
@@ -1437,6 +1520,7 @@ h2 .mono { color: var(--accent); }
       if (!ready || !S.now) return false;
       player.seekTo(0, true);
       player.playVideo();
+      broadcastSoon();
       return true;
     }
     $('#restartBtn').addEventListener('click', function () { if (!restart()) toast('還沒有播放中的歌'); });
@@ -1445,7 +1529,7 @@ h2 .mono { color: var(--accent); }
     $('#seekBar').addEventListener('input', function () { seeking = true; $('#seekCur').textContent = fmtTime(+this.value); });
     $('#seekBar').addEventListener('change', function () {
       seeking = false;
-      if (ready && S.now) player.seekTo(+this.value, true);
+      if (ready && S.now) { player.seekTo(+this.value, true); broadcastSoon(); }
     });
     setInterval(function () {
       var bar = $('#seekBar');
@@ -1479,6 +1563,7 @@ h2 .mono { color: var(--accent); }
       if (v) offsets[S.now.id] = v; else delete offsets[S.now.id];
       store.set('offsets', offsets);
       updateOffset();
+      broadcastSoon();
     }
     $('#offPlus').addEventListener('click', function () { bumpOffset(0.5); });
     $('#offMinus').addEventListener('click', function () { bumpOffset(-0.5); });
@@ -1495,6 +1580,7 @@ h2 .mono { color: var(--accent); }
       if (v) offsets[S.now.id] = v; else delete offsets[S.now.id];
       store.set('offsets', offsets);
       updateOffset();
+      broadcastSoon();
       node.classList.add('tapped');
       setTimeout(function () { node.classList.remove('tapped'); }, 600);
       toast('已對拍，這首歌詞' + (v > 0 ? '提早 ' : v < 0 ? '延後 ' : '不偏移') + (v ? Math.abs(v).toFixed(1) + ' 秒' : ''));
@@ -1513,7 +1599,7 @@ h2 .mono { color: var(--accent); }
 
     function resetLyrics() {
       setCue('');
-      L.vid = null; L.lines = []; L.idx = -2;
+      L.vid = null; L.lines = []; L.idx = -2; L.rid = null;
       var track = $('#track');
       track.replaceChildren(); track.hidden = false; track.style.transform = '';
       $('#plain').hidden = true; $('#plain').replaceChildren();
@@ -1525,9 +1611,6 @@ h2 .mono { color: var(--accent); }
         if (!r.ok) throw new Error('lrclib ' + r.status);
         return r.json();
       });
-    }
-    function lrcGet(id) {
-      return fetch('https://lrclib.net/api/get/' + encodeURIComponent(id)).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
     }
 
     var JUNK = /(official\s*(music\s*|live\s*|lyrics?\s*)?video|official\s*(mv|audio)|(music|live|lyrics?)\s*video|官方完整版|官方版|官方\s*MV|完整版\s*MV|高畫質|動態歌詞|歌詞版|\bM\/?V\b|\bHD\b|\b4K\b)/gi;
@@ -1590,27 +1673,6 @@ h2 .mono { color: var(--accent); }
       return step(0);
     }
 
-    // 對唱標記：行首的「男：」「女：」「合：」「(男)」「M:」「F:」…，之後的行沿用到下一個標記為止
-    var ROLE_RE = /^(?:[(（【\[]\s*(男女|男|女|合)\s*[)）】\]]|(男女|男|女|合|M|F|D|Both)\s*[:：])\s*/i;
-    function roleOf(tag) {
-      tag = tag.toUpperCase();
-      return tag === '男' || tag === 'M' ? 'm' : tag === '女' || tag === 'F' ? 'f' : 'd';
-    }
-    function parseLRC(s) {
-      var out = [], role = '';
-      String(s).split(/\r?\n/).forEach(function (raw) {
-        var re = /\[(\d+):(\d+(?:\.\d+)?)\]/g, m, tags = [];
-        while ((m = re.exec(raw))) tags.push(+m[1] * 60 + +m[2]);
-        if (!tags.length) return;
-        var text = raw.replace(/\[[^\]]*\]/g, '').trim();
-        var rm = text.match(ROLE_RE);
-        if (rm) { role = roleOf(rm[1] || rm[2]); text = text.slice(rm[0].length).trim(); }
-        tags.forEach(function (t) { out.push({ t: t, text: text, role: text ? role : '' }); });
-      });
-      out.sort(function (a, b) { return a.t - b.t; });
-      return out;
-    }
-
     function loadLyrics() {
       var now = S.now;
       if (!now || !ready) return;
@@ -1622,7 +1684,7 @@ h2 .mono { color: var(--accent); }
       var p = picks[now.id] ? lrcGet(picks[now.id]) : Promise.resolve(null);
       p.then(function (rec) { return rec || findLyrics(title, author, dur); })
         .then(function (rec) { if (L.vid === now.id) applyLyrics(rec); })
-        .catch(function () { if (L.vid === now.id) { setSrc('歌詞服務連不上'); showMsg('歌詞服務暫時連不上'); } });
+        .catch(function () { if (L.vid === now.id) { setSrc('歌詞服務連不上'); showMsg('歌詞服務暫時連不上'); L.rid = 0; broadcastSoon(); } });
     }
 
     function showMsg(text) {
@@ -1635,12 +1697,12 @@ h2 .mono { color: var(--accent); }
 
     function applyLyrics(rec) {
       var track = $('#track'), plain = $('#plain');
+      L.rid = rec && (rec.syncedLyrics || rec.plainLyrics) ? rec.id : 0;
+      broadcastSoon();
       if (rec && rec.syncedLyrics) {
         L.lines = parseLRC(rec.syncedLyrics); L.idx = -2;
         track.hidden = false; plain.hidden = true;
-        track.replaceChildren.apply(track, L.lines.map(function (l) {
-          return el('div', { class: 'line' + (l.text ? '' : ' gap') + (l.role ? ' role-' + l.role : '') }, l.text || '♪');
-        }));
+        track.replaceChildren.apply(track, L.lines.map(lyricLine));
         var src = rec.trackName + ' · ' + rec.artistName;
         if (L.lines.some(function (l) { return l.role; })) src += ' · 對唱：藍男、粉女、紫合';
         if (rec._diff > 12) src += ' · 長度差 ' + Math.round(rec._diff) + ' 秒，可能要調時間';
@@ -1687,23 +1749,13 @@ h2 .mono { color: var(--accent); }
       if (rep !== lastRep) { lastRep = rep; lastAt = nowMs; }
       return rep + (pstate === 1 ? Math.min((nowMs - lastAt) / 1000, 0.6) : 0);
     }
-    // KTV 式倒數：前奏、空白行（間奏）或同一句停太久時，顯示離下一句還有多久，最後 3 秒變成 ●●●
-    function updateCue(i, t) {
-      var nx = L.lines[i + 1], cur = L.lines[i];
-      if (!nx) { setCue(''); return; }
-      var from = cur ? cur.t : 0, rem = nx.t - t;
-      var waiting = !cur || !cur.text || t - cur.t > 6;
-      if (!waiting || nx.t - from < 4 || rem <= 0) { setCue(''); return; }
-      if (rem <= 3) setCue(new Array(Math.ceil(rem) + 1).join('●'));
-      else setCue((cur ? '間奏 ' : '前奏 ') + fmtTime(Math.ceil(rem)));
-    }
+    function updateCue(i, t) { setCue(cueText(L.lines, i, t)); }
 
     function tick() {
       requestAnimationFrame(tick);
       if (!ready || !L.lines.length || !player || !player.getCurrentTime || !S.now || L.vid !== S.now.id) { if (cueLast) setCue(''); return; }
       var t = playTime() + (offsets[S.now.id] || 0) + LEAD;
-      var lo = 0, hi = L.lines.length - 1, i = -1;
-      while (lo <= hi) { var mid = (lo + hi) >> 1; if (L.lines[mid].t <= t) { i = mid; lo = mid + 1; } else hi = mid - 1; }
+      var i = lineAt(L.lines, t);
       if (i !== L.idx) setIdx(i);
       updateCue(i, t);
       if (i >= 0) {
@@ -1827,7 +1879,111 @@ h2 .mono { color: var(--accent); }
       sendMsg({ type: 'del', k: it.k }).then(function () { toast('已撤回「' + it.t + '」'); }, function (e) { li.style.opacity = ''; toast(e.message); });
     }
 
+    /* ----- 跟唱：照主機廣播的同步資訊自己推算時間，歌詞自己去 LRCLIB 抓 ----- */
+    var G = { vid: null, lid: undefined, lines: [], idx: -2, sync: null, loop: false, cue: '' };
+    var sing = $('#gSing');
+    if (store.get('singOpen', true) === false) sing.open = false;
+    sing.addEventListener('toggle', function () {
+      store.set('singOpen', sing.open);
+      if (sing.open) { gPosition(); gStart(); }
+    });
+
+    function gMsg(text) {
+      $('#gSingMsg').textContent = text;
+      $('#gSingMsg').hidden = !text;
+    }
+    function gClear(text) {
+      G.lines = []; G.idx = -2;
+      $('#gTrack').replaceChildren(); $('#gTrack').style.transform = '';
+      $('#gPlain').hidden = true; $('#gPlain').replaceChildren();
+      gSetCue('');
+      gMsg(text);
+    }
+    function gSetCue(text) {
+      if (text === G.cue) return;
+      G.cue = text;
+      $('#gCue').textContent = text;
+      $('#gCue').hidden = !text;
+    }
+
+    function onSync(y, title) {
+      if (!y) { G.sync = null; G.vid = null; G.lid = undefined; $('#gSingSrc').textContent = ''; gClear('目前沒有歌'); return; }
+      G.sync = { at: +y.at || 0, ts: +y.ts || Date.now(), p: !!y.p, o: +y.o || 0 };
+      if (y.v === G.vid && y.l === G.lid) { gStart(); return; }
+      G.vid = y.v; G.lid = y.l;
+      $('#gSingSrc').textContent = '';
+      if (y.l == null) { gClear('主機正在找「' + title + '」的歌詞…'); return; }
+      if (!y.l) { gClear('這首沒有找到歌詞'); return; }
+      gClear('載入歌詞中…');
+      lrcGet(y.l).then(function (rec) {
+        if (G.lid !== y.l) return;
+        if (rec && rec.syncedLyrics) {
+          G.lines = parseLRC(rec.syncedLyrics); G.idx = -2;
+          $('#gTrack').replaceChildren.apply($('#gTrack'), G.lines.map(lyricLine));
+          $('#gSingSrc').textContent = rec.trackName + ' · ' + rec.artistName;
+          gMsg('');
+          gSetIdx(-1);
+          gStart();
+        } else if (rec && rec.plainLyrics) {
+          gClear('');
+          $('#gPlain').replaceChildren.apply($('#gPlain'), rec.plainLyrics.split(/\r?\n/).map(function (s) { return el('p', {}, s || ' '); }));
+          $('#gPlain').hidden = false;
+          $('#gSingSrc').textContent = '只有純文字歌詞';
+        } else {
+          gClear('歌詞載入失敗，等一下會自動再試');
+          G.lid = undefined; // 下一次廣播時重抓
+        }
+      });
+    }
+
+    // 主機送出時播到 at 秒，播放中就加上經過的時間（兩台裝置的時鐘都有網路校時，誤差通常很小）
+    function gTime() {
+      var s = G.sync;
+      return s.at + (s.p ? Math.max(0, Date.now() - s.ts) / 1000 : 0) + s.o + LEAD;
+    }
+    function gSetIdx(i) {
+      G.idx = i;
+      var els = $('#gTrack').children;
+      for (var j = 0; j < els.length; j++) {
+        var c = els[j].classList;
+        c.toggle('past', j < i);
+        c.toggle('cur', j === i);
+        c.toggle('nx', j === i + 1);
+        if (j !== i) els[j].style.removeProperty('--p');
+      }
+      gPosition();
+    }
+    function gPosition() {
+      var track = $('#gTrack'), els = track.children;
+      if (!G.lines.length || !els.length) return;
+      var anchor = els[Math.max(G.idx, 0)];
+      var y = $('#gSingBox').clientHeight * 0.4 - (anchor.offsetTop + anchor.offsetHeight / 2);
+      track.style.transform = 'translateY(' + Math.round(y) + 'px)';
+    }
+    window.addEventListener('resize', gPosition);
+    function gStart() {
+      if (G.loop) return;
+      G.loop = true;
+      requestAnimationFrame(gTick);
+    }
+    function gTick() {
+      // 收合、切到背景、沒歌詞時停掉，省電
+      if (!sing.open || document.hidden || !G.sync || !G.lines.length) { G.loop = false; return; }
+      requestAnimationFrame(gTick);
+      var t = gTime(), i = lineAt(G.lines, t);
+      if (i !== G.idx) gSetIdx(i);
+      gSetCue(cueText(G.lines, i, t));
+      if (i >= 0) {
+        var cur = G.lines[i], nx = G.lines[i + 1];
+        var span = nx ? Math.max(nx.t - cur.t, 0.3) : 4;
+        var node = $('#gTrack').children[i];
+        if (node) node.style.setProperty('--p', Math.min(1, Math.max(0, (t - cur.t) / span)).toFixed(3));
+      }
+    }
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) gStart(); });
+
     function renderState(m) {
+      onSync(m.y || null, m.now ? m.now.t : '');
       nowItem = m.now && m.now.i ? { id: m.now.i, title: m.now.t, ch: m.now.c || '' } : null;
       hostPlaying = !!m.p;
       $('#gCtl').hidden = !nowItem;
