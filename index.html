@@ -383,6 +383,7 @@ h2 .mono { color: var(--accent); }
   var $ = function (s) { return document.querySelector(s); };
   var NTFY = 'https://ntfy.sh';
   var LEAD = 0.15; // 歌詞稍微提早一點亮，比較好跟唱
+  var MAX_BATCH = 25; // 一則點歌訊息最多幾首（乘客分批、主機收件都照這個）
 
   var store = {
     get: function (k, d) { try { var v = localStorage.getItem('kdesk:' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
@@ -764,23 +765,59 @@ h2 .mono { color: var(--accent); }
   /* ---------- ntfy.sh 中繼 ---------- */
   function ntfyPub(topic, obj) {
     return fetch(NTFY + '/' + topic, { method: 'POST', body: JSON.stringify(obj) }).then(function (r) {
-      if (!r.ok) throw new Error(r.status === 429 ? '送太快了，等幾秒再點' : '送出失敗（' + r.status + '）');
+      if (r.ok) return;
+      var err = new Error(r.status === 429 ? '送太快了，等幾秒再點' : '送出失敗（' + r.status + '）');
+      err.status = r.status;
+      throw err;
     });
   }
 
+  // since 可以是字串或函式（每次重連時重新取值）。
+  // iOS 背景或斷網後 EventSource 可能停在 CLOSED 不再重連，或看似連著其實已斷，
+  // 所以回到前景、網路恢復、或連線關閉時都主動重開。
   function ntfySub(topic, since, onMsg, onStatus) {
-    var es = new EventSource(NTFY + '/' + topic + '/sse?since=' + encodeURIComponent(since));
-    es.onopen = function () { onStatus(true); };
-    es.onerror = function () { onStatus(false); };
-    es.onmessage = function (e) {
-      var m;
-      try { m = JSON.parse(e.data); } catch (err) { return; }
-      if (m.event && m.event !== 'message') return;
-      var body;
-      try { body = JSON.parse(m.message); } catch (err) { return; }
-      onMsg(body);
+    var es = null, closed = false, retry = null, hiddenAt = 0;
+    function open() {
+      if (es) es.close();
+      var s = typeof since === 'function' ? since() : since;
+      es = new EventSource(NTFY + '/' + topic + '/sse?since=' + encodeURIComponent(s));
+      es.onopen = function () { onStatus(true); };
+      es.onerror = function () {
+        onStatus(false);
+        if (es.readyState === 2) { clearTimeout(retry); retry = setTimeout(revive, 5000); }
+      };
+      es.onmessage = function (e) {
+        var m;
+        try { m = JSON.parse(e.data); } catch (err) { return; }
+        if (m.event && m.event !== 'message') return;
+        var body;
+        try { body = JSON.parse(m.message); } catch (err) { return; }
+        onMsg(body, m);
+      };
+    }
+    function revive(force) {
+      if (closed) return;
+      clearTimeout(retry);
+      if (force === true || !es || es.readyState === 2) open();
+    }
+    function onVis() {
+      if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+      revive(hiddenAt && Date.now() - hiddenAt > 20000);
+      hiddenAt = 0;
+    }
+    function onOnline() { revive(true); }
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('online', onOnline);
+    open();
+    return {
+      close: function () {
+        closed = true;
+        clearTimeout(retry);
+        if (es) es.close();
+        document.removeEventListener('visibilitychange', onVis);
+        window.removeEventListener('online', onOnline);
+      }
     };
-    return es;
   }
 
   /* ---------- 螢幕不關閉 ---------- */
@@ -811,7 +848,9 @@ h2 .mono { color: var(--accent); }
     var S = { queue: Array.isArray(saved.queue) ? saved.queue : [], now: saved.now || null };
     var offsets = store.get('offsets', {});
     var picks = store.get('lyrPicks', {});
-    var seen = {};
+    var seenList = store.get('seenRids', []), seen = {};
+    if (!Array.isArray(seenList)) seenList = [];
+    seenList.forEach(function (r) { seen[r] = 1; });
     var player = null, ready = false, pstate = -1;
     var L = { vid: null, lines: [], idx: -2 };
 
@@ -871,16 +910,23 @@ h2 .mono { color: var(--accent); }
       }
       clearTimeout(armTimer); armNew = false; btn.textContent = '換一組點歌碼';
       topic = 'kdesk-' + randId(12); store.set('topic', topic);
-      drawQR(); subscribe(); broadcast();
+      drawQR(); subscribe(); broadcastSoon();
       toast('已換新點歌碼，請乘客重新掃描');
     });
 
     /* ----- 收乘客點歌 ----- */
+    // 記住收到的最後一則點歌時間；頁面被 iOS 砍掉重開、或斷線重連時，
+    // 從那個時間點補收，中間乘客點的歌才不會漏掉（重複的靠 rid 去重）。
+    var REQ_LOOKBACK = 3 * 3600;
+    function reqSince() {
+      var now = Math.floor(Date.now() / 1000), c = store.get('reqCursor', null);
+      if (c && c.topic === topic && c.t > now - REQ_LOOKBACK) return String(c.t - 1);
+      return String(now - 5);
+    }
     var sub = null;
     function subscribe() {
       if (sub) sub.close();
-      var since = String(Math.floor(Date.now() / 1000) - 5);
-      sub = ntfySub(topic + '-req', since, onRequest, function (ok) {
+      sub = ntfySub(topic + '-req', reqSince, onRequest, function (ok) {
         var c = $('#connState');
         c.textContent = ok ? '點歌通道已連線。乘客用手機相機掃描就能點歌。' : '點歌通道重新連線中…';
         c.classList.toggle('bad', !ok);
@@ -888,12 +934,22 @@ h2 .mono { color: var(--accent); }
     }
     subscribe();
 
-    function onRequest(m) {
+    function markSeen(rid) {
+      seenList.push(rid);
+      if (seenList.length > 300) seenList = seenList.slice(-300);
+      store.set('seenRids', seenList);
+    }
+
+    function onRequest(m, raw0) {
+      if (raw0 && raw0.time) {
+        var c = store.get('reqCursor', null);
+        if (!c || c.topic !== topic || raw0.time > c.t) store.set('reqCursor', { topic: topic, t: raw0.time });
+      }
       if (!m || m.type !== 'add' || !m.rid || seen[m.rid]) return;
       seen[m.rid] = 1;
       var by = String(m.by || '').slice(0, 12);
       var raw = Array.isArray(m.items) ? m.items : [{ id: m.id, title: m.title, ch: m.ch }];
-      Promise.all(raw.slice(0, 25).map(function (x) {
+      Promise.all(raw.slice(0, MAX_BATCH).map(function (x) {
         var id = parseVideoId(x && x.id);
         if (!id) return null;
         var title = String(x.title || '').slice(0, 120), ch = String(x.ch || '').slice(0, 60);
@@ -901,6 +957,7 @@ h2 .mono { color: var(--accent); }
           return { id: id, title: meta.title, ch: meta.ch, by: by };
         });
       })).then(function (songs) {
+        markSeen(m.rid);
         songs = songs.filter(Boolean);
         if (!songs.length) return;
         songs.forEach(addSong);
@@ -953,9 +1010,30 @@ h2 .mono { color: var(--accent); }
     }
 
     /* ----- 把目前狀態廣播給乘客 ----- */
-    var bcTimer;
-    function broadcastSoon() { clearTimeout(bcTimer); bcTimer = setTimeout(broadcast, 800); }
-    function broadcast() {
+    // ntfy.sh 匿名每個 IP 一天只能發 250 則：短時間內的多次變動合併成一則，
+    // 兩次廣播至少間隔 BC_GAP；失敗就退避重試（429 退更久），永遠只送最新狀態。
+    var BC_GAP = 4000;
+    var bc = { timer: null, busy: false, dirty: false, last: 0, gap: BC_GAP, fails: 0 };
+    function broadcastSoon() { bc.dirty = true; scheduleBc(); }
+    function scheduleBc() {
+      if (bc.timer || bc.busy || !bc.dirty) return;
+      bc.timer = setTimeout(flushBc, Math.max(800, bc.last + bc.gap - Date.now()));
+    }
+    function flushBc() {
+      bc.timer = null;
+      if (!bc.dirty) return;
+      bc.dirty = false; bc.busy = true; bc.last = Date.now();
+      ntfyPub(topic + '-st', buildState()).then(function () {
+        bc.fails = 0; bc.gap = BC_GAP;
+      }, function (err) {
+        bc.dirty = true; bc.fails++;
+        bc.gap = err && err.status === 429
+          ? Math.min(Math.max(bc.gap * 2, 30000), 300000)
+          : Math.min(BC_GAP * Math.pow(2, bc.fails), 60000);
+        if (bc.fails === 1) toast('播放清單同步給乘客失敗，會自動重試');
+      }).then(function () { bc.busy = false; scheduleBc(); });
+    }
+    function buildState() {
       var slim = function (it) { return { t: String(it.title).slice(0, 48), b: it.by || '' }; };
       var q = S.queue.slice(0, 20).map(slim), payload;
       var nowSlim = S.now ? { t: String(S.now.title).slice(0, 80), b: S.now.by || '', i: S.now.id, c: String(S.now.ch || '').slice(0, 40) } : null;
@@ -965,7 +1043,7 @@ h2 .mono { color: var(--accent); }
         if (enc.encode(JSON.stringify(payload)).length < 3600 || !q.length) break;
         q = q.slice(0, -2);
       }
-      ntfyPub(topic + '-st', payload).catch(function () {});
+      return payload;
     }
 
     /* ----- YouTube 播放器 ----- */
@@ -1266,7 +1344,7 @@ h2 .mono { color: var(--accent); }
     /* ----- 初始畫面 ----- */
     renderNow();
     renderQueue();
-    broadcast();
+    broadcastSoon();
   }
 
   /* =================================================================
@@ -1305,14 +1383,14 @@ h2 .mono { color: var(--accent); }
       $('#gConn').textContent = ok ? '已連上' : '重新連線中…';
     });
 
-    // 多首會自動分批送出，每批控制在中繼服務的訊息大小上限內
+    // 多首會自動分批送出，每批控制在中繼服務的訊息大小上限內，且不超過主機一次收的 MAX_BATCH 首
     function onAdd(items) {
       var by = $('#gName').value.trim().slice(0, 12);
       var enc = new TextEncoder(), chunks = [], cur = [];
       items.forEach(function (it) {
         var x = { id: it.id, title: String(it.title).slice(0, 80), ch: String(it.ch || '').slice(0, 40) };
         var test = cur.concat([x]);
-        if (cur.length && enc.encode(JSON.stringify({ type: 'add', rid: 'xxxxxxxxxxxx', by: by, items: test })).length > 3500) {
+        if (cur.length && (test.length > MAX_BATCH || enc.encode(JSON.stringify({ type: 'add', rid: 'xxxxxxxxxxxx', by: by, items: test })).length > 3500)) {
           chunks.push(cur); cur = [x];
         } else cur = test;
       });
