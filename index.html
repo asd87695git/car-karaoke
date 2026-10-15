@@ -643,7 +643,7 @@ h2 .mono { color: var(--accent); }
     }).then(function () {
       LRC.last = Date.now();
       return fetch('https://lrclib.net' + path, { headers: { 'Lrclib-Client': LRC_CLIENT } }).then(function (r) {
-        if (r.status === 429) {
+        if (r.status === 429 || r.status === 503) { // 503 是伺服器過載，一樣附 Retry-After
           var ra = parseInt(r.headers.get('Retry-After'), 10);
           throw lrcLimited(isNaN(ra) ? null : ra);
         }
