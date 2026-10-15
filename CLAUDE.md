@@ -20,7 +20,11 @@
   - 單則訊息需小於約 4KB（中文字 UTF-8 佔 3 bytes），程式有分批與截斷；每批最多 `MAX_BATCH`（25）首，乘客端和主機端共用。
   - `ntfySub()` 在回到前景（背景超過 20 秒會強制重連）、網路恢復、連線變 CLOSED 時會自動重新訂閱。
   - 點歌碼格式 `kdesk-` + 12 碼隨機小寫英數。
-- 搜尋：YouTube Data API v3 `search.list`（每次扣 100 單位，每天預設約 100 次）。沒有金鑰時只能貼連結；貼連結用 noembed.com 取得影片標題。
+- 搜尋：YouTube Data API v3 `search.list`（每次扣 100 單位，每天預設約 100 次），一次顯示 5 筆。沒有金鑰時只能貼連結；貼連結用 noembed.com 取得影片標題。
+- 推薦：YouTube 已停用 `relatedToVideoId`，改成 `guessArtist()` 從標題／頻道猜歌手，再用歌手名搜尋（`ytRecommend()`，同歌手結果在記憶體暫存）。
+  - 「你可能喜歡」是按鈕，按了才搜（多扣 100），刻意不自動載入以省額度。
+  - 主機「歌單播完自動播推薦」（設定可關，`kdesk:autoRec`）：從最近 5 首有人點的歌隨機挑歌手，避開最近 60 首播過的（`kdesk:played`），一次搜尋的結果當作電台緩衝連續播；沒金鑰時從我的最愛隨機挑。推薦歌標記 `auto: true`，顯示「自動推薦」。
+- 版面：橫向時操作區（播放器、待播、點歌）在左邊，方便駕駛操作；直向時上下排。
 - 我的最愛：存在各自裝置的 localStorage（key 前綴 `kdesk:`），可勾選多首點播、隨機點 5 首、刪除、備份／匯入（JSON 或多個連結）。
 - 其他：Screen Wake Lock 保持螢幕常亮；QR Code 用 cdnjs 的 qrcodejs 1.0.0。
 
