@@ -11,6 +11,7 @@
 - 同一個檔案兩種模式：網址沒有 hash → 主機（iPad）；`#g=<點歌碼>&k=<API 金鑰>` → 乘客點歌頁。
 - 播放：YouTube IFrame API，`onError` 遇到禁止嵌入的影片自動跳過。
 - 歌詞：LRCLIB（`lrclib.net/api/search`、`/api/get/{id}`）抓 LRC 同步歌詞。`queriesFor()` 會把 YouTube 標題清理成多組查詢（處理【】《》[] 括號、Official MV 等雜字、`- Topic` 頻道），再挑長度最接近影片的版本。可手動調時間偏移（每首記住）、手動換歌詞版本（每首記住）。
+  - 沒有聲音層面的自動對齊（iframe 跨網域拿不到音訊）。對拍：播放中點某一行歌詞＝「現在唱到這句」，偏移量 = 該行時間 − 播放時間（不扣 LEAD，用來抵人的反應時間）。
 - 點歌傳輸：公開的 ntfy.sh 中繼，沒有自己的後端。
   - `<topic>-req`：乘客 → 主機，訊息 `{type:'add', rid, by, items:[{id,title,ch}]}`，主機用 rid 去重（已處理的 rid 存在 localStorage `seenRids`，最多 300 筆）。
     - 主機把最後收到的訊息時間存在 `reqCursor`，重開頁面或重連時用 `since=<時間-1>` 補收（最多回溯 3 小時），避免 iOS 砍掉分頁時漏歌。

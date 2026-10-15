@@ -100,6 +100,8 @@ h2 .mono { color: var(--accent); }
   transition: opacity .3s ease;
   overflow-wrap: anywhere;
 }
+.line { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.line.tapped { text-shadow: 0 0 .5em var(--accent); }
 .line.past { opacity: .12; }
 .line.nx { opacity: .7; }
 .line.gap { color: var(--muted); }
@@ -134,7 +136,7 @@ h2 .mono { color: var(--accent); }
   padding-top: 8px; padding-bottom: max(14px, env(safe-area-inset-bottom, 0px));
   padding-left: max(24px, env(safe-area-inset-left, 0px)); padding-right: 24px;
 }
-.offset { display: flex; align-items: center; gap: 8px; }
+.offset { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .offset .mono { min-width: 5ch; text-align: center; color: var(--accent); }
 
 .rack {
@@ -270,6 +272,7 @@ h2 .mono { color: var(--accent); }
         <button id="offMinus" type="button">歌詞延後</button>
         <span id="offVal" class="mono">0.0s</span>
         <button id="offPlus" type="button">歌詞提早</button>
+        <span class="hint">或在開始唱某一句時，直接點那一行歌詞對拍</span>
       </div>
       <button id="lyrFix" class="ghost" type="button">歌詞不對？</button>
     </footer>
@@ -1119,6 +1122,23 @@ h2 .mono { color: var(--accent); }
     $('#offPlus').addEventListener('click', function () { bumpOffset(0.5); });
     $('#offMinus').addEventListener('click', function () { bumpOffset(-0.5); });
 
+    // 對拍：聽到某一句開始唱時點那一行，直接算出這首的偏移量
+    $('#track').addEventListener('click', function (e) {
+      var node = e.target.closest('.line');
+      if (!node || !S.now || L.vid !== S.now.id || !L.lines.length) return;
+      if (!ready || pstate !== 1) { toast('播放中才能對拍'); return; }
+      var i = Array.prototype.indexOf.call(this.children, node);
+      if (i < 0 || !L.lines[i]) return;
+      // 不扣 LEAD：點下去通常比開口晚一點，保留提早量剛好抵掉反應時間
+      var v = Math.round((L.lines[i].t - playTime()) * 10) / 10;
+      if (v) offsets[S.now.id] = v; else delete offsets[S.now.id];
+      store.set('offsets', offsets);
+      updateOffset();
+      node.classList.add('tapped');
+      setTimeout(function () { node.classList.remove('tapped'); }, 600);
+      toast('已對拍，這首歌詞' + (v > 0 ? '提早 ' : v < 0 ? '延後 ' : '不偏移') + (v ? Math.abs(v).toFixed(1) + ' 秒' : ''));
+    });
+
     /* ----- 歌詞：LRCLIB ----- */
     function setSrc(s) { $('#lyrSrc').textContent = s; }
 
@@ -1281,13 +1301,17 @@ h2 .mono { color: var(--accent); }
     }
     window.addEventListener('resize', positionTrack);
 
+    // getCurrentTime() 更新得不夠密，播放中用上次變動後經過的時間補上
     var lastRep = -1, lastAt = 0;
+    function playTime() {
+      var rep = player.getCurrentTime() || 0, nowMs = performance.now();
+      if (rep !== lastRep) { lastRep = rep; lastAt = nowMs; }
+      return rep + (pstate === 1 ? Math.min((nowMs - lastAt) / 1000, 0.6) : 0);
+    }
     function tick() {
       requestAnimationFrame(tick);
       if (!ready || !L.lines.length || !player || !player.getCurrentTime || !S.now || L.vid !== S.now.id) return;
-      var rep = player.getCurrentTime() || 0, nowMs = performance.now();
-      if (rep !== lastRep) { lastRep = rep; lastAt = nowMs; }
-      var t = rep + (pstate === 1 ? Math.min((nowMs - lastAt) / 1000, 0.6) : 0) + (offsets[S.now.id] || 0) + LEAD;
+      var t = playTime() + (offsets[S.now.id] || 0) + LEAD;
       var lo = 0, hi = L.lines.length - 1, i = -1;
       while (lo <= hi) { var mid = (lo + hi) >> 1; if (L.lines[mid].t <= t) { i = mid; lo = mid + 1; } else hi = mid - 1; }
       if (i !== L.idx) setIdx(i);
