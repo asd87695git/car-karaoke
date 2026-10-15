@@ -1651,16 +1651,19 @@ h2 .mono { color: var(--accent); }
     }
 
     function findLyrics(title, author, dur) {
-      var queries = queriesFor(title, author).slice(0, 5), tried = {};
+      var queries = queriesFor(title, author).slice(0, 5), tried = {}, sent = 0, failed = 0;
       var best = null, bestDiff = Infinity, plainFallback = null;
       function step(i) {
         if (i >= queries.length || (best && bestDiff <= 12)) {
           if (best) { best._diff = bestDiff; return best; }
+          // 每次查詢都失敗（多半是被限流）≠ 找不到，丟錯讓外面顯示「連不上」並重試
+          if (!plainFallback && sent && failed === sent) throw new Error('lrclib unavailable');
           return plainFallback;
         }
         var key = JSON.stringify(queries[i]);
         if (tried[key]) return step(i + 1);
         tried[key] = 1;
+        sent++;
         return lrcSearch(queries[i]).then(function (res) {
           (res || []).forEach(function (r) {
             if (r.syncedLyrics) {
@@ -1668,14 +1671,16 @@ h2 .mono { color: var(--accent); }
               if (diff < bestDiff) { bestDiff = diff; best = r; }
             } else if (r.plainLyrics && !plainFallback) plainFallback = r;
           });
-        }).catch(function () {}).then(function () { return step(i + 1); });
+        }).catch(function () { failed++; }).then(function () { return step(i + 1); });
       }
       return step(0);
     }
 
+    var lyrRetry = { vid: null, n: 0 };
     function loadLyrics() {
       var now = S.now;
       if (!now || !ready) return;
+      if (lyrRetry.vid !== now.id) lyrRetry = { vid: now.id, n: 0 };
       L.vid = now.id;
       setSrc('找歌詞中…');
       var d = (player.getVideoData && player.getVideoData()) || {};
@@ -1684,7 +1689,15 @@ h2 .mono { color: var(--accent); }
       var p = picks[now.id] ? lrcGet(picks[now.id]) : Promise.resolve(null);
       p.then(function (rec) { return rec || findLyrics(title, author, dur); })
         .then(function (rec) { if (L.vid === now.id) applyLyrics(rec); })
-        .catch(function () { if (L.vid === now.id) { setSrc('歌詞服務連不上'); showMsg('歌詞服務暫時連不上'); L.rid = 0; broadcastSoon(); } });
+        .catch(function () {
+          if (L.vid !== now.id) return;
+          L.rid = 0; broadcastSoon();
+          if (lyrRetry.n >= 3) { setSrc('歌詞服務連不上'); showMsg('歌詞服務暫時連不上，可以按下方「歌詞不對？」手動找'); return; }
+          var wait = [8, 20, 45][lyrRetry.n++];
+          setSrc('歌詞服務連不上，' + wait + ' 秒後重試');
+          showMsg('歌詞服務暫時連不上，' + wait + ' 秒後自動重試…');
+          setTimeout(function () { if (S.now && S.now.id === now.id && L.vid === now.id && !L.lines.length) loadLyrics(); }, wait * 1000);
+        });
     }
 
     function showMsg(text) {
@@ -1915,8 +1928,19 @@ h2 .mono { color: var(--accent); }
       if (y.l == null) { gClear('主機正在找「' + title + '」的歌詞…'); return; }
       if (!y.l) { gClear('這首沒有找到歌詞'); return; }
       gClear('載入歌詞中…');
-      lrcGet(y.l).then(function (rec) {
-        if (G.lid !== y.l) return;
+      gLoad(y.l, 0);
+    }
+
+    // 和 iPad 共用熱點時，LRCLIB 可能因為同一個 IP 剛查過而暫時限流，失敗就隔幾秒重試
+    var RETRY = [2000, 5000, 10000, 20000];
+    function gLoad(lid, attempt) {
+      lrcGet(lid).then(function (rec) {
+        if (G.lid !== lid) return;
+        if (!rec && attempt < RETRY.length) {
+          gMsg('歌詞暫時載不到，' + Math.round(RETRY[attempt] / 1000) + ' 秒後重試…');
+          setTimeout(function () { if (G.lid === lid) gLoad(lid, attempt + 1); }, RETRY[attempt]);
+          return;
+        }
         if (rec && rec.syncedLyrics) {
           G.lines = parseLRC(rec.syncedLyrics); G.idx = -2;
           $('#gTrack').replaceChildren.apply($('#gTrack'), G.lines.map(lyricLine));
@@ -1930,7 +1954,7 @@ h2 .mono { color: var(--accent); }
           $('#gPlain').hidden = false;
           $('#gSingSrc').textContent = '只有純文字歌詞';
         } else {
-          gClear('歌詞載入失敗，等一下會自動再試');
+          gClear('歌詞載入失敗，下一首或主機有動作時會再試');
           G.lid = undefined; // 下一次廣播時重抓
         }
       });
