@@ -133,7 +133,8 @@ h2 .mono { color: var(--accent); }
 }
 .idle p { margin: 0; font: 900 clamp(22px, 3vw, 38px)/1.3 var(--font-ui); }
 .idle .hint { font-size: 15px; }
-.qr { background: #fff; padding: 12px; border-radius: 14px; line-height: 0; }
+/* QR 底色用淡灰，不用純白：夜間比較不刺眼，手機一樣掃得到 */
+.qr { background: #c9ced6; padding: 12px; border-radius: 14px; line-height: 0; }
 .qr img, .qr canvas { display: block; max-width: 100%; height: auto; }
 .startover {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -148,6 +149,7 @@ h2 .mono { color: var(--accent); }
 }
 .offset { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .offset .mono { min-width: 5ch; text-align: center; color: var(--accent); }
+#offVal { min-height: 44px; padding: 4px 8px; background: transparent; border-color: transparent; }
 
 .rack {
   order: -1; /* 橫向時操作區在左邊，坐左側的駕駛比較好按 */
@@ -174,8 +176,8 @@ h2 .mono { color: var(--accent); }
 .q-meta { flex: 1; min-width: 0; }
 .q-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .q-by { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.q-act { display: flex; gap: 6px; flex: none; }
-.q-act button { min-height: 36px; padding: 4px 10px; font-size: 13px; }
+.q-act { display: flex; gap: 12px; flex: none; }
+.q-act button { min-height: 40px; min-width: 44px; padding: 4px 10px; font-size: 13px; }
 .qr-row { display: flex; gap: 14px; align-items: center; }
 .qr-row .qr { padding: 8px; border-radius: 10px; flex: none; }
 .link-row { display: flex; gap: 8px; }
@@ -184,6 +186,7 @@ h2 .mono { color: var(--accent); }
 .settings label { font-size: 14px; font-weight: 500; }
 .settings h2 { margin-top: 6px; }
 .conn-badge { margin-left: 8px; font-weight: 500; letter-spacing: 0; color: var(--bad); }
+.fx button.cool { opacity: .45; }
 .settings .check { display: flex; align-items: center; gap: 10px; min-height: 36px; cursor: pointer; }
 .settings .check input { width: 22px; height: 22px; margin: 0; flex: none; accent-color: var(--accent); }
 
@@ -271,11 +274,17 @@ h2 .mono { color: var(--accent); }
 .field label { font-size: 13px; color: var(--muted); }
 
 .toast {
-  position: fixed; left: 50%; transform: translateX(-50%);
+  position: fixed; left: 16px; right: 16px; margin: 0 auto; width: fit-content; max-width: 560px;
   top: calc(12px + env(safe-area-inset-top, 0px));
-  max-width: calc(100% - 32px); background: var(--fg); color: var(--bg);
+  background: var(--chip); color: var(--fg); border: 1px solid var(--accent);
   padding: 10px 16px; border-radius: 12px; font-weight: 500; z-index: 30;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, .4);
+  display: flex; align-items: center; gap: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .5);
+}
+.toast-act { min-height: 36px; padding: 4px 14px; flex: none; background: var(--accent); color: var(--accent-ink); border: 0; font-weight: 700; }
+/* iPhone Safari 遇到 16px 以下的輸入框會在點選時自動放大畫面 */
+@media (pointer: coarse) {
+  input[type="search"], input[type="text"], input:not([type]), textarea, .link-row input { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .track, .line { transition: none; }
@@ -301,7 +310,7 @@ h2 .mono { color: var(--accent); }
       <div class="idle" id="idle">
         <div class="qr" id="qrBig"></div>
         <p>掃描就能點歌</p>
-        <span class="hint">也可以在左邊直接搜尋，或從「我的最愛」點</span>
+        <span class="hint">也可以在操作區直接搜尋，或從「我的最愛」點</span>
       </div>
       <div class="cue" id="cue" hidden></div>
       <button class="startover" id="startBtn" type="button" hidden>▶ 點一下開始播放</button>
@@ -309,7 +318,7 @@ h2 .mono { color: var(--accent); }
     <footer class="stage-foot">
       <div class="offset">
         <button id="offMinus" type="button">歌詞延後</button>
-        <span id="offVal" class="mono">0.0s</span>
+        <button id="offVal" class="mono" type="button" title="點一下歸零" aria-label="歌詞偏移，點一下歸零">0.0s</button>
         <button id="offPlus" type="button">歌詞提早</button>
         <span class="hint">或在開始唱某一句時，直接點那一行歌詞對拍</span>
       </div>
@@ -342,7 +351,8 @@ h2 .mono { color: var(--accent); }
     </section>
 
     <details class="block settings">
-      <summary>設定 <span class="conn-badge" id="connBadge" hidden>點歌通道重新連線中…</span></summary>
+      <summary>設定 <span class="conn-badge" id="connBadge" hidden>點歌通道重新連線中…</span><span class="conn-badge" id="quotaBadge" hidden>今天的同步額度用完了</span></summary>
+      <p class="hint bad" id="wakeHint" hidden>這台裝置沒辦法讓網頁保持螢幕常亮。請到「設定 › 螢幕顯示與亮度 › 自動鎖定」改成「永不」，不然螢幕暗掉後音樂和點歌都會中斷。</p>
       <h2>乘客點歌</h2>
       <div class="qr-row">
         <div class="qr" id="qrSmall"></div>
@@ -357,6 +367,7 @@ h2 .mono { color: var(--accent); }
       <p class="hint">沒填就只能貼連結點歌。金鑰會一起放進 QR Code 讓乘客搜尋，請在 Google Cloud 把金鑰限制成只能從這個網址使用。</p>
       <label class="check"><input type="checkbox" id="autoRec"> 歌單播完自動播推薦歌曲</label>
       <p class="hint">依最近點過的歌手找歌，避開最近播過的；沒填金鑰時改從「我的最愛」隨機挑。</p>
+      <label class="check"><input type="checkbox" id="fxAllow"> 允許乘客遠端播放音效</label>
       <button id="newTopic" type="button">換一組點歌碼</button>
       <p class="hint">換了之後舊的 QR Code 會失效，乘客要重新掃。</p>
     </details>
@@ -401,6 +412,10 @@ h2 .mono { color: var(--accent); }
     <strong>車上點歌台</strong>
     <span class="hint" id="gConn">連線中…</span>
   </div>
+  <div class="field">
+    <label for="gName">你的名字（選填，會顯示在待播清單）</label>
+    <input id="gName" maxlength="12" autocomplete="nickname">
+  </div>
   <div class="g-now">
     <div class="info">
       <div class="label">正在播放</div>
@@ -429,10 +444,6 @@ h2 .mono { color: var(--accent); }
     <h2>待播 <span id="gCount" class="mono"></span></h2>
     <ol id="gQueue" class="queue"></ol>
   </section>
-  <div class="field">
-    <label for="gName">你的名字（選填，會顯示在待播清單）</label>
-    <input id="gName" maxlength="12" autocomplete="nickname">
-  </div>
 </div>
 
 <div id="toast" class="toast" role="status" hidden></div>
@@ -471,12 +482,34 @@ h2 .mono { color: var(--accent); }
     return e;
   }
 
-  var toastTimer;
-  function toast(msg) {
+  // action：{ label, fn }，例如「復原」。有按鈕的提示停留 6 秒，
+  // 這段期間來的一般提示先排著，等它消失再顯示，免得「復原」按鈕被蓋掉
+  var toastTimer, actionUntil = 0, queuedToast = null;
+  function toast(msg, action) {
     var t = $('#toast');
-    t.textContent = msg; t.hidden = false;
+    if (!action && Date.now() < actionUntil) { queuedToast = msg; return; }
+    if (action) {
+      actionUntil = Date.now() + 6000;
+      t.replaceChildren(el('span', {}, msg), el('button', { type: 'button', class: 'toast-act', onclick: function () {
+        t.hidden = true; clearTimeout(toastTimer);
+        actionUntil = 0; queuedToast = null; // 按了復原，排著的提示多半已經不適用
+        action.fn();
+      } }, action.label));
+    } else t.textContent = msg;
+    t.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.hidden = true; }, 3000);
+    toastTimer = setTimeout(function () {
+      t.hidden = true;
+      actionUntil = 0;
+      if (queuedToast) { var q = queuedToast; queuedToast = null; toast(q); }
+    }, action ? 6000 : 3000);
+  }
+
+  // 用影片 id 當 key 的表格：不繼承 Object.prototype，id 剛好是 "constructor" 也不會出事
+  function dict(o) {
+    var d = Object.create(null);
+    if (o && typeof o === 'object' && !Array.isArray(o)) Object.keys(o).forEach(function (k) { d[k] = o[k]; });
+    return d;
   }
 
   function decodeHtml(s) { var t = document.createElement('textarea'); t.innerHTML = s; return t.value; }
@@ -504,17 +537,18 @@ h2 .mono { color: var(--accent); }
   function parseVideoId(s) {
     s = String(s || '').trim();
     var m = s.match(/(?:[?&]v=|youtu\.be\/|\/shorts\/|\/embed\/|\/live\/)([\w-]{11})/);
-    if (m) return m[1];
-    if (/^[\w-]{11}$/.test(s)) return s;
+    if (m) return okId(m[1]);
+    if (/^[\w-]{11}$/.test(s)) return okId(s);
     return null;
   }
+  function okId(id) { return id in Object.prototype ? null : id; }
 
   // 從一段文字裡找出所有 YouTube 影片（可一次貼很多連結）
   function allVideoIds(s) {
     s = String(s || '');
     var out = [], re = /(?:[?&]v=|youtu\.be\/|\/shorts\/|\/embed\/|\/live\/)([\w-]{11})/g, m;
-    while ((m = re.exec(s))) if (out.indexOf(m[1]) === -1) out.push(m[1]);
-    if (!out.length && /^[\w-]{11}$/.test(s.trim())) out.push(s.trim());
+    while ((m = re.exec(s))) if (out.indexOf(m[1]) === -1 && okId(m[1])) out.push(m[1]);
+    if (!out.length && /^[\w-]{11}$/.test(s.trim()) && okId(s.trim())) out.push(s.trim());
     return out;
   }
 
@@ -532,7 +566,9 @@ h2 .mono { color: var(--accent); }
       part: 'snippet', type: 'video', maxResults: String(n || 10), q: q, key: key,
       videoEmbeddable: 'true', videoCategoryId: '10', regionCode: 'TW'
     });
-    return fetch('https://www.googleapis.com/youtube/v3/search?' + params).then(function (r) {
+    return fetch('https://www.googleapis.com/youtube/v3/search?' + params).catch(function () {
+      throw new Error('沒有網路訊號，搜尋不到');
+    }).then(function (r) {
       return r.json().then(function (j) {
         if (!r.ok) {
           var reason = j && j.error && j.error.errors && j.error.errors[0] && j.error.errors[0].reason;
@@ -568,7 +604,7 @@ h2 .mono { color: var(--accent); }
     return a.length > 1 ? a : '';
   }
 
-  var recCache = {};
+  var recCache = Object.create(null);
   // 回傳最多 n 首推薦，排除 exclude（影片 id 陣列）裡的歌
   function ytRecommend(seed, key, exclude, n) {
     var artist = guessArtist(seed.title, seed.ch);
@@ -585,18 +621,30 @@ h2 .mono { color: var(--accent); }
     });
   }
 
+  // 讀不到標題時 bad = true：顯示用暫時標題，但不要把它當成真的標題存進最愛
+  var metaCache = Object.create(null);
   function fetchMeta(id) {
+    if (metaCache[id]) return Promise.resolve(metaCache[id]);
     var url = 'https://noembed.com/embed?url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + id);
     return fetch(url).then(function (r) { return r.json(); }).then(function (j) {
-      if (j && j.title) return { title: j.title, ch: j.author_name || '' };
-      return { title: 'YouTube 影片 ' + id, ch: '' };
-    }).catch(function () { return { title: 'YouTube 影片 ' + id, ch: '' }; });
+      if (j && j.title) return (metaCache[id] = { title: j.title, ch: j.author_name || '' });
+      return { title: 'YouTube 影片 ' + id, ch: '', bad: true };
+    }).catch(function () { return { title: 'YouTube 影片 ' + id, ch: '', bad: true }; });
   }
 
+  // 一次貼很多連結時最多同時查 4 個，不要一口氣把 noembed 打爆
   function metasFor(ids) {
-    return Promise.all(ids.map(function (id) {
-      return fetchMeta(id).then(function (m) { return { id: id, title: m.title, ch: m.ch, thumb: thumbOf(id) }; });
-    }));
+    var out = new Array(ids.length), next = 0;
+    function worker() {
+      if (next >= ids.length) return Promise.resolve();
+      var k = next++, id = ids[k];
+      return fetchMeta(id).then(function (m) {
+        out[k] = { id: id, title: m.title, ch: m.ch, thumb: thumbOf(id), bad: !!m.bad };
+      }).then(worker);
+    }
+    var ws = [];
+    for (var w = 0; w < Math.min(4, ids.length); w++) ws.push(worker());
+    return Promise.all(ws).then(function () { return out; });
   }
 
   /* ---------- 歌詞（主機與乘客跟唱共用） ---------- */
@@ -661,7 +709,7 @@ h2 .mono { color: var(--accent); }
     return lrcFetch('/api/search?' + new URLSearchParams(params)).then(function (res) { return res || []; });
   }
   // 同一份歌詞（主機手動選的、乘客跟唱抓的）記在記憶體，不重複抓
-  var lrcCache = {}, lrcCacheIds = [], lrcPending = {};
+  var lrcCache = Object.create(null), lrcCacheIds = [], lrcPending = Object.create(null);
   function lrcGet(id) {
     if (lrcCache[id]) return Promise.resolve(lrcCache[id]);
     if (lrcPending[id]) return lrcPending[id]; // 同一份正在抓，共用同一個請求
@@ -703,7 +751,7 @@ h2 .mono { color: var(--accent); }
     { k: 'clap', label: '👏 掌聲' },
     { k: 'cheer', label: '🎉 登登' },
     { k: 'drum', label: '🥁 鼓聲' },
-    { k: 'horn', label: '📯 喇叭' }
+    { k: 'horn', label: '🎺 號角' }
   ];
   function fxLabel(k) { for (var i = 0; i < FX.length; i++) if (FX[i].k === k) return FX[i].label; return ''; }
   var actx = null, noiseBuf = null;
@@ -742,6 +790,120 @@ h2 .mono { color: var(--accent); }
     o.connect(g); g.connect(out);
     o.start(t); o.stop(t + dur + 0.05);
   }
+  /* 掌聲：一群人各自用自己的節奏拍手（每人 3.3～5.2 下／秒、音色不同、左右位置不同），
+     0.4 秒內陸續加入、之後陸續停手，約 2.7 秒結束，再加一點房間殘響。
+     每個人整段只用 4 個節點（一條循環噪音 → 閘門 gain → 帶通 → 聲像），每下拍手只是 gain 的自動化，
+     所以節點數只跟人數有關（20～26 人 × 4 + 5 ≈ 85～109 個），跟拍手次數無關。
+     帶通放在閘門後面：短促的噪音脈衝去「敲」共振濾波器，比較像手掌腔體的共鳴。 */
+  var clapIRBuf = null;   // 殘響脈衝響應，第一次用到才產生，之後共用
+  function clapIR(ac) {
+    if (clapIRBuf && clapIRBuf.sampleRate === ac.sampleRate) return clapIRBuf;
+    var sr = ac.sampleRate, len = Math.floor(sr * 0.7), taps = [0.007, 0.012, 0.018, 0.025, 0.033];
+    var buf = ac.createBuffer(2, len, sr), e = 0, ch, i, d, lp, x, p, s;
+    for (ch = 0; ch < 2; ch++) {
+      d = buf.getChannelData(ch); lp = 0;
+      for (i = 0; i < len; i++) {
+        x = i / sr;
+        // 一階低通，越後面越悶（高頻衰減較快）；指數衰減 RT60 約 0.9 秒，最後 80ms 淡出避免截斷爆音
+        lp += (0.9 - 0.55 * Math.min(1, x / 0.5)) * ((Math.random() * 2 - 1) - lp);
+        d[i] = lp * Math.exp(-x * 7.5) * Math.min(1, x / 0.004) * Math.min(1, (len - i) / (sr * 0.08));
+      }
+      for (i = 0; i < taps.length; i++) {   // 早期反射，左右聲道各自隨機
+        p = Math.floor((taps[i] + Math.random() * 0.003) * sr);
+        d[p] += (Math.random() < 0.5 ? -1 : 1) * (0.5 - i * 0.07);
+      }
+      for (i = 0; i < len; i++) e += d[i] * d[i];
+    }
+    // 自己把 IR 能量正規化成 1（配合 normalize=false），濕聲音量才可預期；用瀏覽器預設正規化會小約 13dB，等於沒殘響
+    s = 1 / Math.sqrt(e / 2);
+    for (ch = 0; ch < 2; ch++) { d = buf.getChannelData(ch); for (i = 0; i < len; i++) d[i] *= s; }
+    return (clapIRBuf = buf);
+  }
+  // 一個拍手的人。near = 坐在旁邊、比較大聲、位置偏中間的人；side = -1 左／1 右
+  function clapper(ac, bus, t0, t1, near, side) {
+    var src = ac.createBufferSource(), g = ac.createGain(), bp = ac.createBiquadFilter(), p = null;
+    var f = near ? 1100 + Math.random() * 700 : 650 * Math.pow(2, Math.random() * 1.9);   // 650～2400 Hz：手掌越凹越低沉
+    var q = 0.7 + Math.random() * 0.9;
+    var tau = 0.006 + Math.random() * 0.008;          // 每一下的衰減時間常數
+    var amp = near ? 0.9 : 0.42 + Math.random() * 0.4;
+    var per = 1 / (3.3 + Math.random() * 1.9);        // 每秒 3.3～5.2 下（熱烈一點）
+    var tc = t0, last = t0, k = 0, dur = t1 - t0, x, a;
+    src.buffer = noiseBuf; src.loop = true;
+    bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q;
+    g.gain.setValueAtTime(0, t0);
+    while (tc < t1) {
+      x = (tc - t0) / dur;                            // 這個人拍到第幾成
+      a = amp * (0.75 + Math.random() * 0.5)          // 每下輕重不同
+        * Math.min(1, 0.45 + k * 0.3)                 // 剛開始拍比較輕
+        * (x > 0.7 ? 1 - (x - 0.7) * 1.6 : 1);        // 快停手時變小聲（最低約 0.52 倍，不會變負）
+      bp.frequency.setValueAtTime(f * (0.9 + Math.random() * 0.2), tc);   // 每下手型略有不同
+      g.gain.setValueAtTime(a, tc);
+      g.gain.setTargetAtTime(0, tc, tau);             // 用 setTarget 衰減到 0，不用 exponentialRamp
+      last = tc; k++;
+      tc += per * (1 + x * 0.15) * (0.92 + Math.random() * 0.16);   // 有點不穩，快結束時稍微變慢
+    }
+    src.connect(g); g.connect(bp);
+    if (ac.createStereoPanner) {                      // Safari 14.1 以前沒有，就不做聲像
+      p = ac.createStereoPanner();
+      p.pan.value = near ? side * 0.3 : (Math.random() * 2 - 1) * 0.85;
+      bp.connect(p); p.connect(bus);
+    } else bp.connect(bus);
+    src.start(t0, Math.random() * 1.9);               // 共用 2 秒噪音 buffer（loop），各人從不同位置開始
+    src.stop(last + 0.12);
+  }
+  function crowdClap(ac, dest, t) {
+    var n = 20 + Math.floor(Math.random() * 7), i, t0, t1;   // 20～26 人
+    var bus = ac.createGain(), hp = ac.createBiquadFilter(), rev = ac.createConvolver(), dry = ac.createGain(), wet = ac.createGain();
+    hp.type = 'highpass'; hp.frequency.value = 300;            // 去掉噪音的低頻悶響（藍牙喇叭也吃不到）
+    bus.gain.setValueAtTime(0.4, t);                           // 群體起伏：0.4 秒內漸強，1 秒後慢慢收
+    bus.gain.linearRampToValueAtTime(1, t + 0.4);
+    bus.gain.setValueAtTime(1, t + 1.0);
+    bus.gain.linearRampToValueAtTime(0.6, t + 2.7);
+    dry.gain.value = 0.85; wet.gain.value = 0.25;
+    rev.normalize = false; rev.buffer = clapIR(ac);            // normalize 要在設 buffer 之前
+    bus.connect(hp); hp.connect(dry); hp.connect(rev); rev.connect(wet);
+    dry.connect(dest); wet.connect(dest);
+    for (i = 0; i < n; i++) {
+      t0 = t + (i < 3 ? Math.random() * 0.05 : Math.pow(Math.random(), 0.8) * 0.4);   // 前 3 人先拍，其他人 0.4 秒內加入
+      t1 = t + 0.9 + 1.8 * Math.pow(Math.random(), 1.5);                              // 多數人 1～1.8 秒停，少數拍到 2.7 秒
+      if (i < 2) t1 = t + 2.0 + Math.random() * 0.6;                                  // 旁邊兩位拍得最久，尾巴才不會太稀
+      if (t1 < t0 + 0.6) t1 = t0 + 0.6;
+      clapper(ac, bus, t0, t1, i < 2, i ? 1 : -1);
+    }
+    // 最後一下約 2.7 秒 + 殘響 0.7 秒，之後把這組節點從輸出拆掉，長途反覆觸發也不會累積
+    setTimeout(function () { try { dry.disconnect(); wet.disconnect(); } catch (e) {} }, 4000);
+  }
+
+  /* 號角：G4–C5–E5 三短一長（G5 拉長加顫音），音域比汽車喇叭高很多，不會被誤認成路上有人按喇叭 */
+  function brass(ac, out, t, f, dur, vib) {
+    var g = ac.createGain(), lp = ac.createBiquadFilter(), i, o, lfo = null, lfoG;
+    lp.type = 'lowpass'; lp.Q.value = 1.2;
+    lp.frequency.setValueAtTime(700, t);
+    lp.frequency.exponentialRampToValueAtTime(3200, t + 0.05);
+    lp.frequency.exponentialRampToValueAtTime(1900, t + 0.2);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.13, t + 0.03);
+    g.gain.setValueAtTime(0.13, t + dur - 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    lp.connect(g); g.connect(out);
+    if (vib) {
+      lfo = ac.createOscillator(); lfoG = ac.createGain();
+      lfo.frequency.value = 5.5;
+      lfoG.gain.setValueAtTime(0, t);
+      lfoG.gain.linearRampToValueAtTime(f * 0.012, t + 0.35);
+      lfo.connect(lfoG);
+      lfo.start(t); lfo.stop(t + dur + 0.05);
+    }
+    for (i = 0; i < 2; i++) {
+      o = ac.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = f * (i ? 1.004 : 1);
+      if (lfo) lfoG.connect(o.frequency);
+      o.connect(lp);
+      o.start(t); o.stop(t + dur + 0.05);
+    }
+  }
+
   var lastFx = 0;
   function playFx(k) {
     var ac = audioCtx();
@@ -755,29 +917,20 @@ h2 .mono { color: var(--accent); }
     var out = ac.createGain(), t = ac.currentTime + 0.02, i;
     out.gain.value = 0.8; out.connect(ac.destination);
     if (k === 'clap') {
-      for (i = 0; i < 70; i++) {
-        var at = t + Math.pow(Math.random(), 1.6) * 2.6;
-        noiseHit(ac, out, at, 'bandpass', 900 + Math.random() * 1600, 0.25 + Math.random() * 0.35, 0.06 + Math.random() * 0.05);
-      }
+      // 掌聲是寬頻噪音，平均音量比其他音效小約 4dB，補回來（峰值仍在 0.5 左右，不會爆音）
+      var cg = ac.createGain();
+      cg.gain.value = 1.6; cg.connect(out);
+      crowdClap(ac, cg, t);
     } else if (k === 'drum') {
       tone(ac, out, t, 'sine', 220, 80, 0.9, 0.18);            // ba
       noiseHit(ac, out, t, 'bandpass', 1800, 0.35, 0.12);
       tone(ac, out, t + 0.2, 'sine', 160, 60, 0.9, 0.22);      // dum
       noiseHit(ac, out, t + 0.45, 'highpass', 7000, 0.5, 1.2); // tss
     } else if (k === 'horn') {
-      [[0, 0.32], [0.42, 0.32], [0.84, 0.9]].forEach(function (b) {
-        [329.6, 415.3, 493.9].forEach(function (f) {
-          var o = ac.createOscillator(), lp = ac.createBiquadFilter(), g = ac.createGain();
-          o.type = 'sawtooth'; o.frequency.value = f;
-          lp.type = 'lowpass'; lp.frequency.value = 2400;
-          g.gain.setValueAtTime(0.0001, t + b[0]);
-          g.gain.exponentialRampToValueAtTime(0.16, t + b[0] + 0.02);
-          g.gain.setValueAtTime(0.16, t + b[0] + b[1] - 0.04);
-          g.gain.exponentialRampToValueAtTime(0.0001, t + b[0] + b[1]);
-          o.connect(lp); lp.connect(g); g.connect(out);
-          o.start(t + b[0]); o.stop(t + b[0] + b[1] + 0.05);
-        });
-      });
+      brass(ac, out, t, 392, 0.13);
+      brass(ac, out, t + 0.16, 523.25, 0.13);
+      brass(ac, out, t + 0.32, 659.25, 0.13);
+      brass(ac, out, t + 0.5, 783.99, 0.95, true);
     } else if (k === 'cheer') {
       [523.3, 659.3, 784, 1046.5].forEach(function (f, j) { tone(ac, out, t + j * 0.11, 'triangle', f, f, 0.35, 0.18); });
       [523.3, 659.3, 784, 1046.5].forEach(function (f) { tone(ac, out, t + 0.48, 'triangle', f, f, 0.22, 0.9); });
@@ -786,8 +939,7 @@ h2 .mono { color: var(--accent); }
 
   /* ---------- 唱過／點過的歌（存在這台裝置） ---------- */
   function makeHist(key) {
-    var map = store.get(key, {});
-    if (!map || typeof map !== 'object' || Array.isArray(map)) map = {};
+    var map = dict(store.get(key, {}));
     var subs = [];
     return {
       add: function (it) {
@@ -828,7 +980,7 @@ h2 .mono { color: var(--accent); }
       add: function (items) {
         var n = 0;
         items.slice().reverse().forEach(function (it) {
-          if (!it || !it.id || has(it.id)) return;
+          if (!it || !it.id || it.bad || has(it.id)) return; // 讀不到標題的先不存，避免最愛裡出現「YouTube 影片 xxx」
           list.unshift({ id: it.id, title: String(it.title || '').slice(0, 120), ch: String(it.ch || '').slice(0, 60) });
           n++;
         });
@@ -842,9 +994,10 @@ h2 .mono { color: var(--accent); }
         list = list.filter(function (x) { return !drop[x.id]; });
         if (list.length !== before) save();
       },
+      // 回傳 true = 加入、false = 移除、null = 沒加成（還讀不到歌名）
       toggle: function (it) {
         if (has(it.id)) { this.remove([it.id]); return false; }
-        this.add([it]); return true;
+        return this.add([it]) ? true : null;
       },
       exportText: function () {
         return JSON.stringify({ v: 1, f: list.map(function (x) { return [x.id, x.title, x.ch]; }) });
@@ -870,6 +1023,8 @@ h2 .mono { color: var(--accent); }
     };
   })();
 
+  function toastFav(r) { toast(r === null ? '還讀不到這首的歌名，等一下再收藏' : r ? '已加入我的最愛' : '已從我的最愛移除'); }
+
   function starButton(btn, getItem) {
     function paint() {
       var it = getItem();
@@ -884,7 +1039,7 @@ h2 .mono { color: var(--accent); }
     btn.addEventListener('click', function () {
       var it = getItem();
       if (!it) return;
-      toast(Favs.toggle(it) ? '已加入我的最愛' : '已從我的最愛移除');
+      toastFav(Favs.toggle(it));
     });
     Favs.on(paint);
     return paint;
@@ -907,7 +1062,7 @@ h2 .mono { color: var(--accent); }
     btn.disabled = true;
     $('#ioHint').textContent = '匯入中…';
     Favs.importText(ta.value).then(function (n) {
-      $('#ioHint').textContent = n ? '已加入 ' + n + ' 首到我的最愛' : '沒有新的歌可以加入（可能都已經在最愛裡，或格式看不懂）';
+      $('#ioHint').textContent = n ? '已加入 ' + n + ' 首到我的最愛' : '沒有新的歌可以加入（可能都已經在最愛裡、格式看不懂，或暫時讀不到影片資訊）';
       if (n) ta.value = '';
     }).catch(function () { $('#ioHint').textContent = '匯入失敗，請確認內容是備份文字或 YouTube 連結'; })
       .then(function () { btn.disabled = false; });
@@ -918,6 +1073,8 @@ h2 .mono { color: var(--accent); }
   function mountPicker(root, opts) {
     // recSeed：搜尋結果第一首，按「你可能喜歡」才用它去找推薦（多扣一次搜尋額度）
     var mode = 'search', results = [], recs = [], recSeed = null, recState = '', sel = {}, busy = false, searchSeq = 0;
+    // 搜尋一次扣 100 額度：搜尋中不重複送，同一個關鍵字這次開頁面期間直接用上次的結果
+    var searching = false, qCache = Object.create(null);
     var favCount = el('span', { class: 'mono' });
     var tabSearch = el('button', { type: 'button', role: 'tab', class: 'tab' }, '搜尋點歌');
     var tabFav = el('button', { type: 'button', role: 'tab', class: 'tab' }, '我的最愛', favCount);
@@ -946,36 +1103,48 @@ h2 .mono { color: var(--accent); }
       input.blur();
       var q = input.value.trim();
       if (!q) return;
+      var ids = allVideoIds(q), key = opts.key();
+      var qk = q.toLowerCase().replace(/\s+/g, ' ');
+      // 關鍵字搜尋還在跑：直接擋掉，不要動到進行中那一次的結果
+      if (!ids.length && key && !qCache[qk] && searching) { hint.textContent = '上一個搜尋還在找，等一下'; return; }
       hint.classList.remove('bad');
       sel = {}; recs = []; recSeed = null; recState = '';
       var seq = ++searchSeq;
-      var ids = allVideoIds(q);
       if (ids.length) {
         hint.textContent = '讀取影片資訊…';
         metasFor(ids.slice(0, 20)).then(function (items) {
+          if (seq !== searchSeq) return;
           results = items;
           hint.textContent = items.length > 1 ? '找到 ' + items.length + ' 首，可以勾選後一次點' : '';
           render();
         });
         return;
       }
-      var key = opts.key();
       if (!key) {
         results = []; render();
         hint.textContent = '沒有開搜尋。到 YouTube 或 YouTube Music 按「分享」→「複製連結」貼在這裡，一次貼好幾個也可以。';
         return;
       }
+      if (qCache[qk]) { showResults(qCache[qk]); return; }
+      searching = true;
       hint.textContent = '搜尋中…';
       ytSearch(q, key, 5).then(function (items) {
+        searching = false;
+        qCache[qk] = items;
         if (seq !== searchSeq) return;
+        showResults(items);
+      }).catch(function (err) {
+        searching = false;
+        if (seq !== searchSeq) return;
+        results = []; render();
+        hint.textContent = err.message; hint.classList.add('bad');
+      });
+      function showResults(items) {
         results = items;
         recSeed = items[0] || null;
         hint.textContent = items.length ? '' : '找不到，換個關鍵字試試';
         render();
-      }).catch(function (err) {
-        results = []; render();
-        hint.textContent = err.message; hint.classList.add('bad');
-      });
+      }
     });
 
     function loadRecs() {
@@ -1010,7 +1179,13 @@ h2 .mono { color: var(--accent); }
         toast(items.length > 1 ? '已點 ' + items.length + ' 首' : '已點「' + items[0].title + '」');
         render();
       }).catch(function (e) {
-        toast((e && e.message) || '送出失敗，再試一次');
+        // 分批送到一半失敗：已送出的先取消勾選，再按一次只會送剩下的，不會重複點
+        var sent = (e && e.sentIds) || [];
+        if (sent.length) {
+          sent.forEach(function (id) { delete sel[id]; });
+          render();
+          toast('已送出 ' + sent.length + ' 首，還有 ' + (items.length - sent.length) + ' 首沒送出（' + e.message + '），再按一次送剩下的');
+        } else toast((e && e.message) || '送出失敗，再試一次');
       }).then(function () { busy = false; });
     }
 
@@ -1032,7 +1207,7 @@ h2 .mono { color: var(--accent); }
       if (mode !== 'fav') {
         var on = Favs.has(it.id);
         side = el('button', { type: 'button', class: 'star' + (on ? ' on' : ''), 'aria-pressed': String(on), 'aria-label': (on ? '從我的最愛移除「' : '收藏「') + it.title + '」' }, on ? '★' : '☆');
-        side.addEventListener('click', function () { toast(Favs.toggle(it) ? '已加入我的最愛' : '已從我的最愛移除'); });
+        side.addEventListener('click', function () { toastFav(Favs.toggle(it)); });
       } else {
         side = el('button', { type: 'button', class: 'icon', 'aria-label': '從我的最愛刪除「' + it.title + '」' }, '✕');
         side.addEventListener('click', function () { Favs.remove([it.id]); toast('已從我的最愛刪除「' + it.title + '」'); });
@@ -1059,9 +1234,10 @@ h2 .mono { color: var(--accent); }
       if (mode !== 'fav') {
         kids.push(el('button', { type: 'button', onclick: function () {
           sel = {};
-          var c = Favs.add(items);
+          var c = Favs.add(items), bad = items.filter(function (x) { return x.bad; }).length;
           if (!c) render();
-          toast(c ? '已收藏 ' + c + ' 首' : '這些都已經在我的最愛裡');
+          toast(c ? '已收藏 ' + c + ' 首' + (bad ? '（' + bad + ' 首還讀不到歌名，先不收藏）' : '')
+            : bad ? '還讀不到歌名，等一下再收藏' : '這些都已經在我的最愛裡');
         } }, '收藏'));
       } else {
         kids.push(el('button', { type: 'button', onclick: function () {
@@ -1127,11 +1303,20 @@ h2 .mono { color: var(--accent); }
   }
 
   /* ---------- ntfy.sh 中繼 ---------- */
+  // 429 分兩種：送太快（等幾秒就好）、今天額度用完（ntfy 錯誤代碼 42908，要等額度慢慢恢復）
   function ntfyPub(topic, obj) {
     return fetch(NTFY + '/' + topic, { method: 'POST', body: JSON.stringify(obj) }).then(function (r) {
       if (r.ok) return;
-      var err = new Error(r.status === 429 ? '送太快了，等幾秒再點' : '送出失敗（' + r.status + '）');
-      err.status = r.status;
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        var quota = r.status === 429 && j && j.code === 42908;
+        var err = new Error(quota ? '今天的點歌通道額度用完了（約 12 小時內慢慢恢復）'
+          : r.status === 429 ? '送太快了，等幾秒再點' : '送出失敗（' + r.status + '）');
+        err.status = r.status; err.quota = quota;
+        throw err;
+      });
+    }, function () {
+      var err = new Error('沒有網路訊號，沒送出去，有訊號再按一次');
+      err.status = 0;
       throw err;
     });
   }
@@ -1139,7 +1324,8 @@ h2 .mono { color: var(--accent); }
   // since 可以是字串或函式（每次重連時重新取值）。
   // iOS 背景或斷網後 EventSource 可能停在 CLOSED 不再重連，或看似連著其實已斷，
   // 所以回到前景、網路恢復、或連線關閉時都主動重開。
-  function ntfySub(topic, since, onMsg, onStatus) {
+  // onAlive(time)：收到伺服器的 keepalive（約每 45 秒），代表到這個時間點為止的訊息都已經收到
+  function ntfySub(topic, since, onMsg, onStatus, onAlive) {
     var es = null, closed = false, retry = null, hiddenAt = 0;
     function open() {
       if (es) es.close();
@@ -1158,6 +1344,9 @@ h2 .mono { color: var(--accent); }
         try { body = JSON.parse(m.message); } catch (err) { return; }
         onMsg(body, m);
       };
+      if (onAlive) es.addEventListener('keepalive', function (e) {
+        try { var m = JSON.parse(e.data); if (m && m.time) onAlive(m.time); } catch (err) {}
+      });
     }
     function revive(force) {
       if (closed) return;
@@ -1185,16 +1374,26 @@ h2 .mono { color: var(--accent); }
   }
 
   /* ---------- 螢幕不關閉 ---------- */
-  var wakeLock = null;
+  // wakeWant：現在想不想常亮；wakePending：請求還沒回來。
+  // 請求回來時如果已經不想要了（例如乘客剛好按了暫停），就馬上放掉，不會留一個沒人管的鎖
+  var wakeLock = null, wakeWant = false, wakePending = false, onWakeFail = null, onWakeOk = null;
   function keepAwake() {
-    if (wakeLock || !('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
+    wakeWant = true;
+    if (wakeLock || wakePending || document.visibilityState !== 'visible') return;
+    if (!('wakeLock' in navigator)) { if (onWakeFail) onWakeFail(); return; }
+    wakePending = true;
     navigator.wakeLock.request('screen').then(function (wl) {
+      wakePending = false;
+      if (!wakeWant) { wl.release().catch(function () {}); return; }
       wakeLock = wl;
-      wl.addEventListener('release', function () { wakeLock = null; });
-    }).catch(function () {});
+      wl.addEventListener('release', function () { if (wakeLock === wl) wakeLock = null; });
+      if (onWakeOk) onWakeOk();
+    }).catch(function () { wakePending = false; if (onWakeFail) onWakeFail(); });
   }
-  document.addEventListener('visibilitychange', keepAwake);
-  document.addEventListener('click', keepAwake);
+  function releaseAwake() {
+    wakeWant = false;
+    if (wakeLock) { var wl = wakeLock; wakeLock = null; wl.release().catch(function () {}); }
+  }
 
   var hash = new URLSearchParams(location.hash.slice(1));
   if (hash.has('g')) startGuest(); else startHost();
@@ -1210,16 +1409,35 @@ h2 .mono { color: var(--accent); }
     var apiKey = store.get('apiKey', '');
     var saved = store.get('state', null) || {};
     var S = { queue: Array.isArray(saved.queue) ? saved.queue : [], now: saved.now || null };
-    var offsets = store.get('offsets', {});
-    var picks = store.get('lyrPicks', {});
-    var seenList = store.get('seenRids', []), seen = {};
+    var offsets = dict(store.get('offsets', {}));
+    var picks = dict(store.get('lyrPicks', {}));
+    var seenList = store.get('seenRids', []), seen = Object.create(null);
     if (!Array.isArray(seenList)) seenList = [];
     seenList.forEach(function (r) { seen[r] = 1; });
     var player = null, ready = false, pstate = -1, playing = false;
-    // rid：目前歌詞在 LRCLIB 的 id（null = 還在找，0 = 沒有），廣播給乘客跟唱用
-    var L = { vid: null, lines: [], idx: -2, rid: null };
+    // rid：目前歌詞在 LRCLIB 的 id（null = 還在找，0 = 確定沒有，-1 = 暫時載不到），廣播給乘客跟唱用
+    // gen：每次換歌、重新載入、手動選歌詞都加 1，舊的非同步結果回來時看到 gen 不同就丟掉
+    var L = { vid: null, lines: [], idx: -2, rid: null, gen: 0 };
 
     $('#apiKey').value = apiKey;
+
+    // 螢幕常亮：主機一直開。做不到的裝置提醒把自動鎖定關掉（只提醒一次）
+    // 一次失敗不一定是裝置不支援（例如剛切回前景），連續失敗 2 次或根本沒有這個功能才提醒；成功就收起提醒
+    var wakeWarned = false, wakeFails = 0;
+    onWakeFail = function () {
+      wakeFails++;
+      if (wakeFails < 2 && 'wakeLock' in navigator) return;
+      $('#wakeHint').hidden = false;
+      if (!wakeWarned) { wakeWarned = true; toast('這台裝置沒辦法自動保持螢幕常亮，請把「自動鎖定」設成永不（詳見設定）'); }
+    };
+    onWakeOk = function () { wakeFails = 0; $('#wakeHint').hidden = true; };
+    document.addEventListener('visibilitychange', keepAwake);
+    document.addEventListener('click', keepAwake);
+
+    // 乘客音效開關：關掉時乘客手機的音效列會隱藏
+    var fxAllow = store.get('fxAllow', true);
+    $('#fxAllow').checked = fxAllow;
+    $('#fxAllow').addEventListener('change', function () { fxAllow = this.checked; store.set('fxAllow', fxAllow); broadcastSoon(); });
 
     var histPlayed = makeHist('histPlayed');
     var picker = mountPicker($('#hPicker'), {
@@ -1227,7 +1445,7 @@ h2 .mono { color: var(--accent); }
       hist: histPlayed, histLabel: '唱過', histEmpty: '還沒有唱過的歌，播過的歌會記在這裡。',
       key: function () { return apiKey; },
       onAdd: function (items) {
-        items.forEach(function (it) { addSong({ id: it.id, title: it.title, ch: it.ch || '', by: '' }); });
+        items.forEach(function (it) { addSong({ id: it.id, title: it.title, ch: it.ch || '', by: '', bad: it.bad ? 1 : undefined }); });
       }
     });
 
@@ -1246,7 +1464,7 @@ h2 .mono { color: var(--accent); }
         var box = $(pair[0]);
         box.replaceChildren();
         if (window.QRCode) {
-          new QRCode(box, { text: url, width: pair[1], height: pair[1], colorDark: '#0a0d12', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+          new QRCode(box, { text: url, width: pair[1], height: pair[1], colorDark: '#0a0d12', colorLight: '#c9ced6', correctLevel: QRCode.CorrectLevel.M });
           var img = box.querySelector('img'); if (img) img.alt = '點歌 QR Code';
         } else {
           box.textContent = 'QR Code 載入失敗，請複製下方連結';
@@ -1277,7 +1495,7 @@ h2 .mono { color: var(--accent); }
       }
       clearTimeout(armTimer); armNew = false; btn.textContent = '換一組點歌碼';
       topic = 'kdesk-' + randId(12); store.set('topic', topic);
-      drawQR(); subscribe(); broadcastSoon();
+      drawQR(); subscribe();
       toast('已換新點歌碼，請乘客重新掃描');
     });
 
@@ -1288,7 +1506,13 @@ h2 .mono { color: var(--accent); }
     function reqSince() {
       var now = Math.floor(Date.now() / 1000), c = store.get('reqCursor', null);
       if (c && c.topic === topic && c.t > now - REQ_LOOKBACK) return String(c.t - 1);
-      return String(now - 5);
+      // 很久沒開：補收最近 15 分鐘，乘客比 iPad 早打開頁面送的 hello、點的歌也收得到
+      // （遙控和音效有 20 秒新鮮度限制，點歌用 rid 去重，不會重複）
+      return String(now - 900);
+    }
+    function bumpCursor(t) {
+      var c = store.get('reqCursor', null);
+      if (!c || c.topic !== topic || t > c.t) store.set('reqCursor', { topic: topic, t: t });
     }
     var sub = null;
     function subscribe() {
@@ -1298,7 +1522,19 @@ h2 .mono { color: var(--accent); }
         c.textContent = ok ? '點歌通道已連線。乘客用手機相機掃描就能點歌。' : '點歌通道重新連線中…';
         c.classList.toggle('bad', !ok);
         $('#connBadge').hidden = ok; // 設定收合時也看得到斷線
-      });
+      }, bumpCursor); // keepalive 也推進補收起點：就算很久沒人點歌，斷線期間的點歌也補得回來
+    }
+
+    // 最近 6 小時內有乘客出現過（任何訊息，包括乘客打開頁面時送的 hello）才廣播，
+    // 自己一個人開車時不浪費中繼額度
+    var GUEST_TTL = 6 * 3600 * 1000;
+    function noteGuest(ms) {
+      var g = store.get('guestSeen', null);
+      if (!g || g.topic !== topic || ms > g.t) store.set('guestSeen', { topic: topic, t: ms });
+    }
+    function guestRecent() {
+      var g = store.get('guestSeen', null);
+      return !!(g && g.topic === topic && Date.now() - g.t < GUEST_TTL);
     }
     subscribe();
 
@@ -1309,19 +1545,18 @@ h2 .mono { color: var(--accent); }
     }
 
     function onRequest(m, raw0) {
-      if (raw0 && raw0.time) {
-        var c = store.get('reqCursor', null);
-        if (!c || c.topic !== topic || raw0.time > c.t) store.set('reqCursor', { topic: topic, t: raw0.time });
-      }
+      if (raw0 && raw0.time) bumpCursor(raw0.time);
       if (!m || !m.rid || seen[m.rid]) return;
       seen[m.rid] = 1;
+      noteGuest(raw0 && raw0.time ? raw0.time * 1000 : Date.now());
       var by = String(m.by || '').slice(0, 12);
       if (m.type !== 'add') {
         markSeen(m.rid);
         // 遙控和音效只認 20 秒內送出的，避免重連補收時把舊指令又執行一次
         var fresh = !raw0 || !raw0.time || Date.now() / 1000 - raw0.time < 20;
-        if (m.type === 'ctl' && fresh) onRemote(m, by);
-        else if (m.type === 'fx' && fresh) { if (playFx(m.fx)) toast((by || '有人') + ' ' + fxLabel(m.fx)); }
+        if (m.type === 'hello') broadcastSoon(); // 有乘客剛打開頁面，送一份最新狀態給他
+        else if (m.type === 'ctl' && fresh) onRemote(m, by);
+        else if (m.type === 'fx' && fresh && fxAllow) { if (playFx(m.fx)) toast((by || '有人') + ' ' + fxLabel(m.fx)); }
         else if (m.type === 'del') onWithdraw(m, by);
         return;
       }
@@ -1332,25 +1567,35 @@ h2 .mono { color: var(--accent); }
         var title = String(x.title || '').slice(0, 120), ch = String(x.ch || '').slice(0, 60);
         return (title ? Promise.resolve({ title: title, ch: ch }) : fetchMeta(id)).then(function (meta) {
           // k：乘客端能自己算出來的項目代碼（rid 前 5 碼＋批次內序號），撤回時用
-          return { id: id, title: meta.title, ch: meta.ch, by: by, k: m.rid.slice(0, 5) + j.toString(36) };
+          return { id: id, title: meta.title, ch: meta.ch, by: by, k: m.rid.slice(0, 5) + j.toString(36), bad: meta.bad ? 1 : undefined };
         });
       })).then(function (songs) {
         markSeen(m.rid);
         songs = songs.filter(Boolean);
         if (!songs.length) return;
+        // 待播最多 100 首、同一個名字最多同時排 30 首，避免一個人塞爆清單
+        var mine = by ? S.queue.filter(function (x) { return x.by === by; }).length : 0;
+        var roomAll = MAX_QUEUE - S.queue.length, roomMine = by ? MAX_PER_GUEST - mine : MAX_QUEUE;
+        var room = Math.min(roomAll, roomMine);
+        var why = roomMine < roomAll ? '每人最多同時排 ' + MAX_PER_GUEST + ' 首' : '待播清單滿了';
+        var dropped = songs.length - Math.max(0, room);
+        if (room <= 0) { toast((by || '有人') + ' 點的歌沒加進去：' + why); return; }
+        songs = songs.slice(0, room);
         songs.forEach(addSong);
-        toast((by || '有人') + (songs.length > 1 ? ' 點了 ' + songs.length + ' 首' : ' 點了「' + songs[0].title + '」'));
+        toast((by || '有人') + (songs.length > 1 ? ' 點了 ' + songs.length + ' 首' : ' 點了「' + songs[0].title + '」') + (dropped > 0 ? '（' + why + '，' + dropped + ' 首沒加）' : ''));
       });
     }
+    var MAX_QUEUE = 100, MAX_PER_GUEST = 30;
 
     // 乘客手機遙控；vid 對不上代表別人已經切過了，就不再切一次
     function onRemote(m, by) {
       var who = by || '有人';
       if ((m.act === 'next' || m.act === 'restart') && (!S.now || m.vid !== S.now.id)) return;
-      if (m.act === 'next') { toast(who + ' 切歌了'); next(); }
+      if (m.act === 'next') skip(who + ' 切歌了');
       else if (m.act === 'restart') { if (restart()) toast(who + ' 要重唱這首'); }
-      else if (m.act === 'pause') { if (ready && pstate === 1) { player.pauseVideo(); toast(who + ' 按了暫停'); } }
-      else if (m.act === 'play') { if (ready && S.now && pstate !== 1) { player.playVideo(); toast(who + ' 按了播放'); } }
+      else if (m.act === 'pause') { if (ready && pstate === 1) { startToken++; player.pauseVideo(); toast(who + ' 按了暫停'); } }
+      else if (m.act === 'play') { if (ready && S.now && pstate !== 1) { player.playVideo(); checkStarted(2500); toast(who + ' 按了播放'); } }
+      broadcastSoon(); // 就算這次沒照做（例如 iPad 擋下播放），也讓乘客的按鈕回到正確狀態
     }
 
     function onWithdraw(m, by) {
@@ -1374,10 +1619,28 @@ h2 .mono { color: var(--accent); }
       if (!S.now) next(); else changed();
     }
 
+    // 跳過目前這首，提示裡附「復原」：在顛簸路上誤按也救得回來
+    function skip(msg) {
+      var prev = S.now, at = ready && player.getCurrentTime ? player.getCurrentTime() || 0 : 0;
+      var wasCounted = prev && countedVid === prev.id;
+      next();
+      if (!prev) return;
+      toast(msg || '已跳過「' + prev.title + '」', { label: '復原', fn: function () {
+        if (S.now) S.queue.unshift(S.now);
+        S.now = prev;
+        countedVid = wasCounted ? prev.id : null; // 已經算過就不重複算；還沒播滿 10 秒的之後照常算
+        resetLyrics(); renderNow(); changed();
+        if (ready) { player.loadVideoById({ videoId: prev.id, startSeconds: Math.max(0, at - 2) }); armStartWatch(); }
+      } });
+    }
+
     function next() {
       var prev = S.now;
       S.now = S.queue.shift() || null;
       if (S.now) remember(S.now);
+      countedVid = null; clearTimeout(countTimer); countTimer = null;
+      $('#lyrModal').hidden = true; // 手動找歌詞的視窗是針對上一首開的
+      if (S.now) holdBroadcast();
       resetLyrics();
       renderNow();
       changed();
@@ -1401,8 +1664,30 @@ h2 .mono { color: var(--accent); }
       if (autoOn && !S.now && !S.queue.length && played.length) autoRec();
     });
 
+    // 之前讀不到歌名的歌：開始播放後跟播放器要正確的標題
+    function fixTitle() {
+      if (!S.now || !S.now.bad || !player.getVideoData) return;
+      var d = player.getVideoData() || {};
+      if (!d.title) return;
+      S.now.title = d.title; S.now.ch = d.author || S.now.ch;
+      delete S.now.bad;
+      renderNow(); changed();
+    }
+
+    // 「唱過」要真的播滿 10 秒才記（擋掉不能嵌入、一下就被跳過的歌）
+    var countedVid = null, countTimer = null;
+    function countPlay() {
+      if (!S.now || countedVid === S.now.id || countTimer) return;
+      var vid = S.now.id;
+      countTimer = setTimeout(function () {
+        countTimer = null;
+        if (!S.now || S.now.id !== vid || countedVid === vid) return;
+        countedVid = vid;
+        if (!S.now.auto && !S.now.bad) histPlayed.add(S.now);
+      }, 10000);
+    }
+
     function remember(it) {
-      if (!it.auto) histPlayed.add(it);
       played.push({ id: it.id, title: it.title, ch: it.ch || '', auto: !!it.auto });
       if (played.length > 60) played = played.slice(-60);
       store.set('played', played);
@@ -1459,7 +1744,17 @@ h2 .mono { color: var(--accent); }
             el('div', { class: 'q-by' }, it.by ? it.by + ' 點的' : it.auto ? '自動推薦' : (it.ch || ''))),
           el('div', { class: 'q-act' },
             i > 0 ? el('button', { type: 'button', onclick: function () { var x = S.queue.splice(i, 1)[0]; S.queue.unshift(x); changed(); } }, '插播') : null,
-            el('button', { type: 'button', 'aria-label': '移除「' + it.title + '」', onclick: function () { S.queue.splice(i, 1); changed(); } }, '✕')));
+            el('button', { type: 'button', 'aria-label': '移除「' + it.title + '」', onclick: function () {
+              var before = i > 0 ? S.queue[i - 1] : null;
+              var x = S.queue.splice(i, 1)[0];
+              changed();
+              toast('已移除「' + x.title + '」', { label: '復原', fn: function () {
+                // 清單在這 6 秒內可能變了（換歌、插播），用「前一首」定位，不用舊的索引
+                var at = before ? S.queue.indexOf(before) + 1 : 0;
+                S.queue.splice(at, 0, x);
+                if (!S.now) next(); else changed();
+              } });
+            } }, '✕')));
       }));
     }
 
@@ -1467,25 +1762,48 @@ h2 .mono { color: var(--accent); }
     // ntfy.sh 匿名每個 IP 一天只能發 250 則：短時間內的多次變動合併成一則，
     // 兩次廣播至少間隔 BC_GAP；失敗就退避重試（429 退更久），永遠只送最新狀態。
     var BC_GAP = 4000;
-    var bc = { timer: null, busy: false, dirty: false, last: 0, gap: BC_GAP, fails: 0 };
+    // hold：換歌後最多等 8 秒，讓「換歌、開始播放、歌詞找到」合併成一則
+    // lastY：上一則成功送出的同步資訊，緩衝結束時拿來判斷乘客的時間有沒有跑掉
+    var bc = { timer: null, busy: false, dirty: false, last: 0, gap: BC_GAP, fails: 0, hold: 0, lastY: null };
     function broadcastSoon() { bc.dirty = true; scheduleBc(); }
     function scheduleBc() {
       if (bc.timer || bc.busy || !bc.dirty) return;
-      bc.timer = setTimeout(flushBc, Math.max(1500, bc.last + bc.gap - Date.now()));
+      bc.timer = setTimeout(flushBc, Math.max(1500, bc.last + bc.gap - Date.now(), bc.hold - Date.now()));
     }
+    function reschedule() {
+      if (bc.timer) { clearTimeout(bc.timer); bc.timer = null; }
+      scheduleBc();
+    }
+    function holdBroadcast() { bc.hold = Date.now() + 8000; reschedule(); }
+    function releaseHold() { if (!bc.hold) return; bc.hold = 0; reschedule(); }
     function flushBc() {
       bc.timer = null;
       if (!bc.dirty) return;
+      if (!guestRecent()) { bc.dirty = false; return; } // 沒有乘客，先不送；乘客打開頁面會送 hello 叫醒
       bc.dirty = false; bc.busy = true; bc.last = Date.now();
-      ntfyPub(topic + '-st', buildState()).then(function () {
-        bc.fails = 0; bc.gap = BC_GAP;
+      var payload = buildState();
+      ntfyPub(topic + '-st', payload).then(function () {
+        bc.fails = 0; bc.gap = BC_GAP; bc.lastY = payload.y; bc.lastErr = '';
+        $('#quotaBadge').hidden = true;
       }, function (err) {
         bc.dirty = true; bc.fails++;
-        bc.gap = err && err.status === 429
-          ? Math.min(Math.max(bc.gap * 2, 30000), 300000)
-          : Math.min(BC_GAP * Math.pow(2, bc.fails), 60000);
-        if (bc.fails === 1) toast('播放清單同步給乘客失敗，會自動重試');
+        bc.lastErr = err && err.quota ? 'quota' : err && err.status === 0 ? 'net' : 'other';
+        if (err && err.quota) {
+          bc.gap = 30 * 60 * 1000; // 今天額度用完：半小時試一次就好
+          $('#quotaBadge').hidden = false;
+        } else {
+          bc.gap = err && err.status === 429
+            ? Math.min(Math.max(bc.gap * 2, 30000), 300000)
+            : Math.min(BC_GAP * Math.pow(2, bc.fails), 60000);
+        }
+        if (bc.fails === 1) toast(err && err.quota ? '今天的同步額度用完了，乘客手機會暫停更新（點歌還是收得到）' : '播放清單同步給乘客失敗，會自動重試');
       }).then(function () { bc.busy = false; scheduleBc(); });
+    }
+    // 緩衝結束時，如果照上一則同步資訊推算的時間跟實際差不到 1 秒，就不用再廣播
+    function syncStillGood() {
+      var y = bc.lastY;
+      if (!y || !S.now || y.v !== S.now.id || !y.p || !player || !player.getCurrentTime) return false;
+      return Math.abs(y.at + (Date.now() - y.ts) / 1000 - (player.getCurrentTime() || 0)) < 1;
     }
     function buildState() {
       var slim = function (it) { return { t: String(it.title).slice(0, 48), b: it.by || '', a: it.auto ? 1 : undefined, k: it.k }; };
@@ -1497,12 +1815,13 @@ h2 .mono { color: var(--accent); }
         l: L.vid === S.now.id ? L.rid : null,
         o: offsets[S.now.id] || 0,
         at: ready && player.getCurrentTime ? Math.round((player.getCurrentTime() || 0) * 100) / 100 : 0,
+        d: ready && player.getDuration ? Math.round(player.getDuration() || 0) : 0, // 乘客用來判斷主機是不是已經離線
         ts: Date.now(),
         p: playing ? 1 : 0
       } : null;
       var enc = new TextEncoder();
       while (true) {
-        payload = { type: 'state', now: nowSlim, q: q, n: S.queue.length, p: playing ? 1 : 0, y: sync, ts: Date.now() };
+        payload = { type: 'state', now: nowSlim, q: q, n: S.queue.length, p: playing ? 1 : 0, f: fxAllow ? 1 : 0, y: sync, ts: Date.now() };
         if (enc.encode(JSON.stringify(payload)).length < 3600 || !q.length) break;
         q = q.slice(0, -2);
       }
@@ -1527,16 +1846,21 @@ h2 .mono { color: var(--accent); }
             // 緩衝中不改「播放中」旗標；進入播放（含緩衝結束、拖進度後）或暫停時廣播，
             // 讓乘客的暫停鍵顯示對的字、跟唱時間重新校正
             var p = e.data === 1 ? true : e.data === 2 || e.data === 0 || e.data === 5 ? false : playing;
-            if (p !== playing || (e.data === 1 && prev !== 1)) { playing = p; broadcastSoon(); }
+            if (p !== playing) { playing = p; broadcastSoon(); }
+            else if (e.data === 1 && prev !== 1 && !syncStillGood()) broadcastSoon(); // 拖進度或緩衝造成時間跑掉
             if (e.data === 0) next();
             if (e.data === 1) {
               $('#startBtn').hidden = true;
+              fixTitle();
+              countPlay();
               if (S.now && L.vid !== S.now.id) loadLyrics();
             }
           },
           onError: function () {
+            // 只跳過「出錯的那一首」：600ms 內如果已經被切走，就不要再多跳一首
+            var bad = S.now && S.now.id;
             toast('「' + (S.now ? S.now.title : '這首') + '」不能在網頁播放，已跳過');
-            setTimeout(next, 600);
+            setTimeout(function () { if (S.now && S.now.id === bad) next(); }, 600);
           }
         }
       });
@@ -1545,14 +1869,28 @@ h2 .mono { color: var(--accent); }
     ytScript.src = 'https://www.youtube.com/iframe_api';
     document.head.append(ytScript);
 
+    var START_TEXT = '▶ 點一下開始播放';
+    var startToken = 0; // 換歌、暫停都會讓之前「確認有沒有開始播」的檢查作廢
     function armStartWatch() {
+      startToken++;
+      $('#startBtn').textContent = START_TEXT;
       setTimeout(function () {
         if (S.now && (pstate === -1 || pstate === 5)) $('#startBtn').hidden = false;
       }, 1800);
     }
+    // 要求播放後確認真的有開始；iPad 有時不接受外層按鈕觸發播放，要直接點影片
+    function checkStarted(delay) {
+      var tok = ++startToken;
+      setTimeout(function () {
+        if (tok === startToken && S.now && ready && pstate !== 1 && pstate !== 3) {
+          $('#startBtn').textContent = '▶ 再點一次，或直接點影片畫面';
+          $('#startBtn').hidden = false;
+        }
+      }, delay || 1500);
+    }
 
     $('#startBtn').addEventListener('click', function () {
-      if (ready && S.now) player.playVideo();
+      if (ready && S.now) { player.playVideo(); checkStarted(); }
       $('#startBtn').hidden = true;
       keepAwake();
     });
@@ -1562,8 +1900,8 @@ h2 .mono { color: var(--accent); }
     }
     $('#playBtn').addEventListener('click', function () {
       if (!ready) return;
-      if (pstate === 1) player.pauseVideo();
-      else if (S.now) player.playVideo();
+      if (pstate === 1) { startToken++; player.pauseVideo(); }
+      else if (S.now) { player.playVideo(); checkStarted(); }
       else if (S.queue.length) next();
       else toast('待播清單是空的，先點一首吧');
     });
@@ -1600,7 +1938,7 @@ h2 .mono { color: var(--accent); }
 
     $('#nextBtn').addEventListener('click', function () {
       if (!S.now && !S.queue.length) { toast('沒有下一首了'); return; }
-      next();
+      skip();
     });
 
     /* ----- 歌詞時間調整 ----- */
@@ -1608,16 +1946,23 @@ h2 .mono { color: var(--accent); }
       var v = S.now ? (offsets[S.now.id] || 0) : 0;
       $('#offVal').textContent = (v > 0 ? '+' : '') + v.toFixed(1) + 's';
     }
-    function bumpOffset(d) {
+    function setOffset(v) {
       if (!S.now) return;
-      var v = Math.round(((offsets[S.now.id] || 0) + d) * 10) / 10;
+      v = Math.round(v * 10) / 10;
       if (v) offsets[S.now.id] = v; else delete offsets[S.now.id];
       store.set('offsets', offsets);
       updateOffset();
       broadcastSoon();
     }
+    function bumpOffset(d) { if (S.now) setOffset((offsets[S.now.id] || 0) + d); }
     $('#offPlus').addEventListener('click', function () { bumpOffset(0.5); });
     $('#offMinus').addEventListener('click', function () { bumpOffset(-0.5); });
+    $('#offVal').addEventListener('click', function () {
+      if (!S.now || !offsets[S.now.id]) return;
+      var old = offsets[S.now.id], vid = S.now.id;
+      setOffset(0);
+      toast('這首的歌詞偏移已歸零', { label: '復原', fn: function () { if (S.now && S.now.id === vid) setOffset(old); } });
+    });
 
     // 對拍：聽到某一句開始唱時點那一行，直接算出這首的偏移量
     $('#track').addEventListener('click', function (e) {
@@ -1628,13 +1973,18 @@ h2 .mono { color: var(--accent); }
       if (i < 0 || !L.lines[i]) return;
       // 不扣 LEAD：點下去通常比開口晚一點，保留提早量剛好抵掉反應時間
       var v = Math.round((L.lines[i].t - playTime()) * 10) / 10;
-      if (v) offsets[S.now.id] = v; else delete offsets[S.now.id];
-      store.set('offsets', offsets);
-      updateOffset();
-      broadcastSoon();
-      node.classList.add('tapped');
-      setTimeout(function () { node.classList.remove('tapped'); }, 600);
-      toast('已對拍，這首歌詞' + (v > 0 ? '提早 ' : v < 0 ? '延後 ' : '不偏移') + (v ? Math.abs(v).toFixed(1) + ' 秒' : ''));
+      var old = offsets[S.now.id] || 0, vid = S.now.id;
+      var desc = '這首歌詞' + (v > 0 ? '提早 ' : v < 0 ? '延後 ' : '不偏移') + (v ? Math.abs(v).toFixed(1) + ' 秒' : '');
+      var apply = function () {
+        if (!S.now || S.now.id !== vid) return;
+        setOffset(v);
+        node.classList.add('tapped');
+        setTimeout(function () { node.classList.remove('tapped'); }, 600);
+      };
+      // 一次差超過 8 秒多半是誤觸（例如指著螢幕、車子顛簸），先問一下
+      if (Math.abs(v - old) > 8) { toast('要對拍到這一句嗎？' + desc, { label: '確定', fn: apply }); return; }
+      apply();
+      toast('已對拍，' + desc, { label: '復原', fn: function () { if (S.now && S.now.id === vid) setOffset(old); } });
     });
 
     /* ----- 歌詞：LRCLIB ----- */
@@ -1650,7 +2000,8 @@ h2 .mono { color: var(--accent); }
 
     function resetLyrics() {
       setCue('');
-      L.vid = null; L.lines = []; L.idx = -2; L.rid = null;
+      L.vid = null; L.lines = []; L.idx = -2; L.rid = null; L.gen++;
+      lyrRetry = { vid: null, n: 0 }; // 每次播放都有完整的重試次數
       var track = $('#track');
       track.replaceChildren(); track.hidden = false; track.style.transform = '';
       $('#plain').hidden = true; $('#plain').replaceChildren();
@@ -1700,10 +2051,11 @@ h2 .mono { color: var(--accent); }
       st = st || { queries: queriesFor(title, author).slice(0, 5), i: 0, tried: {}, done: 0, failed: 0, best: null, bestDiff: Infinity, plain: null };
       function step() {
         if (st.i >= st.queries.length || (st.best && st.bestDiff <= 12)) {
-          if (st.best) { st.best._diff = st.bestDiff; return st.best; }
+          if (st.best) { st.best._diff = st.bestDiff; return { rec: st.best, sure: true }; }
           // 每次查詢都出錯 ≠ 找不到，丟錯讓外面顯示「連不上」並重試
           if (!st.plain && st.done && st.failed === st.done) throw new Error('lrclib unavailable');
-          return st.plain;
+          // sure：每一組都有正常回應才算「確定」，有出錯的就不要記成「這首沒有歌詞」
+          return { rec: st.plain, sure: st.failed === 0 };
         }
         var q = st.queries[st.i], key = JSON.stringify(q);
         if (st.tried[key]) { st.i++; return step(); }
@@ -1724,7 +2076,8 @@ h2 .mono { color: var(--accent); }
     }
 
     var lyrRetry = { vid: null, n: 0 };
-    var lyrCache = {}, lyrCacheIds = []; // 影片 id → 找到的歌詞，同一首再播不用重找
+    var lyrCache = Object.create(null), lyrCacheIds = []; // 影片 id → 找到的歌詞（或確定沒有），同一首再播不用重找
+    var NO_LYRICS = { none: true };
     function cacheLyrics(vid, rec) {
       if (!lyrCache[vid]) { lyrCacheIds.push(vid); if (lyrCacheIds.length > 30) delete lyrCache[lyrCacheIds.shift()]; }
       lyrCache[vid] = rec;
@@ -1734,27 +2087,66 @@ h2 .mono { color: var(--accent); }
       if (!now || !ready) return;
       if (lyrRetry.vid !== now.id) lyrRetry = { vid: now.id, n: 0 };
       L.vid = now.id;
-      if (lyrCache[now.id]) { applyLyrics(lyrCache[now.id]); return; }
+      var gen = ++L.gen;
+      var hit = lyrCache[now.id];
+      if (hit) { applyLyrics(hit.none ? null : hit); return; }
       setSrc('找歌詞中…');
       var d = (player.getVideoData && player.getVideoData()) || {};
       var title = d.title || now.title, author = d.author || now.ch || '';
       var dur = player.getDuration ? player.getDuration() : 0;
       var p = picks[now.id] ? lrcGet(picks[now.id]) : Promise.resolve(null);
-      p.then(function (rec) { return rec || findLyrics(title, author, dur, lyrRetry.st); })
-        .then(function (rec) { if (rec) cacheLyrics(now.id, rec); if (L.vid === now.id) applyLyrics(rec); })
+      p.then(function (rec) { return rec ? { rec: rec, sure: true } : findLyrics(title, author, dur, lyrRetry.st); })
+        .then(function (r) {
+          if (L.gen !== gen) return; // 期間換歌或手動選了歌詞，這個結果作廢
+          if (r.rec || r.sure) cacheLyrics(now.id, r.rec || NO_LYRICS); // 確定沒有也記起來，再播不用重查 5 次
+          applyLyrics(r.rec);
+        })
         .catch(function (err) {
-          if (L.vid !== now.id) return;
-          if (err && err.resume) lyrRetry.st = err.resume; // 下次從被擋的那組接著查
-          // 重試期間 L.rid 維持 null（乘客那邊顯示「主機正在找」），全部失敗才告訴乘客沒有歌詞
-          if (lyrRetry.n >= 6) { setSrc('歌詞服務連不上'); showMsg('歌詞服務暫時連不上，可以按下方「歌詞不對？」手動找'); L.rid = 0; broadcastSoon(); return; }
+          if (L.gen !== gen) return;
+          // 被限流就記下進度、下次從被擋的那組接著查；其他錯誤下次從頭查
+          lyrRetry.st = (err && err.resume) || null;
+          if (navigator.onLine === false) { // 沒訊號（隧道、山區）：不算重試次數，等網路恢復再載
+            setSrc('沒有網路訊號');
+            showMsg('目前沒有網路訊號，恢復後會自動載入歌詞');
+            if (L.rid !== -1) { L.rid = -1; releaseHold(); broadcastSoon(); }
+            return;
+          }
+          if (lyrRetry.n >= 6) {
+            // 放棄前，先看之前查到的結果能不能用（例如長度差比較多的版本）
+            // 不放進快取：下次再播這首時還會重新找更準的版本
+            var st = lyrRetry.st, part = st && (st.best || st.plain);
+            if (part) {
+              if (st.best) part._diff = st.bestDiff;
+              applyLyrics(part);
+              return;
+            }
+            setSrc('歌詞服務連不上，稍後自動再試');
+            showMsg('歌詞服務暫時連不上，可以按下方「歌詞不對？」手動找');
+            L.rid = -1; releaseHold(); broadcastSoon();
+            // 例如 iPad 連著熱點、熱點本身沒訊號時不會觸發 online 事件，所以放棄後還是每 90 秒試 3 次
+            setTimeout(function () {
+              if (L.gen === gen && S.now && S.now.id === now.id && L.rid === -1) { lyrRetry.n = 3; lyrRetry.st = null; loadLyrics(); }
+            }, 90000);
+            return;
+          }
           // 被限流就照退避時間（多等 0.5 秒），其他錯誤用固定間隔
           var wait = err && err.retryAfter != null ? err.retryAfter + 0.5 : [5, 10, 20, 30, 45, 60][lyrRetry.n];
           lyrRetry.n++;
           setSrc('歌詞服務忙碌，' + Math.ceil(wait) + ' 秒後重試');
           showMsg('歌詞服務暫時忙碌，' + Math.ceil(wait) + ' 秒後自動重試…');
-          setTimeout(function () { if (S.now && S.now.id === now.id && L.vid === now.id && !L.lines.length) loadLyrics(); }, wait * 1000);
+          setTimeout(function () { if (L.gen === gen && S.now && S.now.id === now.id) loadLyrics(); }, wait * 1000);
         });
     }
+
+    // 網路恢復：歌詞沒載到的重新載，乘客同步也馬上補送
+    window.addEventListener('online', function () {
+      LRC.backoff = 0; LRC.until = 0;
+      lyrRetry.n = 0;
+      // 只重載「已經放棄」的；還在找的（L.rid === null）讓它自己跑完，不要開第二條平行的搜尋
+      if (S.now && ready && L.vid === S.now.id && L.rid === -1 && !L.lines.length && $('#plain').hidden) { lyrRetry.st = null; loadLyrics(); }
+      // 只有「斷線」造成的退避才重來；額度用完或被限流就照原本的等待時間
+      if (bc.fails && bc.lastErr === 'net') { bc.gap = BC_GAP; bc.fails = 0; broadcastSoon(); reschedule(); }
+    });
 
     function showMsg(text) {
       L.lines = []; L.idx = -2;
@@ -1767,6 +2159,7 @@ h2 .mono { color: var(--accent); }
     function applyLyrics(rec) {
       var track = $('#track'), plain = $('#plain');
       L.rid = rec && (rec.syncedLyrics || rec.plainLyrics) ? rec.id : 0;
+      releaseHold();
       broadcastSoon();
       if (rec && rec.syncedLyrics) {
         L.lines = parseLRC(rec.syncedLyrics); L.idx = -2;
@@ -1838,8 +2231,10 @@ h2 .mono { color: var(--accent); }
     requestAnimationFrame(tick);
 
     /* ----- 手動找歌詞 ----- */
+    var lqVid = null, lqSeq = 0; // 手動找歌詞是針對哪一首開的；lqSeq：每次開視窗、送出搜尋都加 1
     $('#lyrFix').addEventListener('click', function () {
       if (!S.now) { toast('還沒有播放中的歌'); return; }
+      lqVid = S.now.id; lqSeq++;
       $('#lqInput').value = cleanTitle(S.now.title);
       $('#lqResults').replaceChildren();
       $('#lyrModal').hidden = false;
@@ -1849,10 +2244,11 @@ h2 .mono { color: var(--accent); }
     $('#lyrModal').addEventListener('click', function (e) { if (e.target === this) this.hidden = true; });
     $('#lqForm').addEventListener('submit', function (e) {
       e.preventDefault();
-      var q = $('#lqInput').value.trim(), box = $('#lqResults');
+      var q = $('#lqInput').value.trim(), box = $('#lqResults'), seq = ++lqSeq;
       if (!q) return;
       box.replaceChildren(el('p', { class: 'hint' }, '搜尋中…'));
       lrcSearch({ q: q }).then(function (res) {
+        if (seq !== lqSeq) return; // 期間又開了新的視窗或送了新的搜尋
         var dur = ready && player.getDuration ? player.getDuration() : 0;
         if (!res.length) { box.replaceChildren(el('p', { class: 'hint' }, '找不到，試試只打歌名，或改用簡體字')); return; }
         res.sort(function (a, b) {
@@ -1864,18 +2260,22 @@ h2 .mono { color: var(--accent); }
           return el('button', {
             type: 'button', class: 'lq-item',
             onclick: function () {
-              if (!S.now) return;
+              $('#lyrModal').hidden = true;
+              if (!S.now || S.now.id !== lqVid) { toast('已經換歌了，請重新按「歌詞不對？」找這首的歌詞'); return; }
               picks[S.now.id] = r.id; store.set('lyrPicks', picks);
               cacheLyrics(S.now.id, r);
               L.vid = S.now.id;
+              L.gen++; // 還在跑的自動搜尋回來時要作廢
               applyLyrics(r);
-              $('#lyrModal').hidden = true;
             }
           },
             el('span', { class: 'lq-t' }, r.trackName),
             el('span', { class: 'lq-a' }, r.artistName + ' · ' + fmtTime(r.duration) + (r.syncedLyrics ? ' · 同步' : ' · 純文字')));
         }));
-      }).catch(function (err) { box.replaceChildren(el('p', { class: 'hint bad' }, err && err.retryAfter != null ? err.message : '歌詞服務連不上，等一下再試')); });
+      }).catch(function (err) {
+        if (seq !== lqSeq) return;
+        box.replaceChildren(el('p', { class: 'hint bad' }, err && err.retryAfter != null ? err.message : '歌詞服務連不上，等一下再試'));
+      });
     });
 
     /* ----- 初始畫面 ----- */
@@ -1913,40 +2313,79 @@ h2 .mono { color: var(--accent); }
     }
 
     /* ----- 遙控主機 ----- */
+    // 整台車共用同一個中繼額度：按了之後 2.5 秒內不能再按同一顆
+    function cool(btn) { btn.disabled = true; setTimeout(function () { btn.disabled = false; }, 2500); }
+    function paintPlay() { $('#gPlay').textContent = hostPlaying ? '⏸ 暫停' : '▶ 播放'; }
     $('#gRestart').addEventListener('click', function () {
       if (!nowItem) return;
+      cool(this);
       sendMsg({ type: 'ctl', act: 'restart', vid: nowItem.id }).then(function () { toast('已請主機重唱這首'); }, function (e) { toast(e.message); });
     });
     $('#gPlay').addEventListener('click', function () {
       if (!nowItem) return;
       var act = hostPlaying ? 'pause' : 'play';
-      sendMsg({ type: 'ctl', act: act, vid: nowItem.id }).then(function () { toast(act === 'pause' ? '已請主機暫停' : '已請主機播放'); }, function (e) { toast(e.message); });
+      cool(this);
+      sendMsg({ type: 'ctl', act: act, vid: nowItem.id }).then(function () {
+        hostPlaying = act === 'play'; paintPlay(); // 先照按下去的結果顯示，主機的下一則廣播會再校正
+        toast(act === 'pause' ? '已請主機暫停' : '已請主機播放');
+      }, function (e) { toast(e.message); });
     });
-    var armNext = false, armNextTimer;
+    var armNext = false, armNextTimer, armVid = null;
+    function disarmNext() { clearTimeout(armNextTimer); armNext = false; armVid = null; $('#gNext').textContent = '⏭ 切歌'; }
     $('#gNext').addEventListener('click', function () {
-      var btn = this;
       if (!nowItem) return;
       if (!armNext) {
-        armNext = true; btn.textContent = '再按一次';
-        armNextTimer = setTimeout(function () { armNext = false; btn.textContent = '⏭ 切歌'; }, 3000);
+        armNext = true; armVid = nowItem.id; this.textContent = '再按一次';
+        armNextTimer = setTimeout(disarmNext, 3000);
         return;
       }
-      clearTimeout(armNextTimer); armNext = false; btn.textContent = '⏭ 切歌';
-      sendMsg({ type: 'ctl', act: 'next', vid: nowItem.id }).then(function () { toast('已請主機切歌'); }, function (e) { toast(e.message); });
+      var vid = armVid; // 用第一下按的時候那首歌，期間換歌了也不會切到下一首
+      disarmNext();
+      cool(this);
+      sendMsg({ type: 'ctl', act: 'next', vid: vid }).then(function () { toast('已請主機切歌'); }, function (e) { toast(e.message); });
     });
 
-    var lastFxSent = 0;
+    // 音效：每支手機 6 秒一次、10 分鐘最多 10 次（記在手機上，重新整理也不會歸零），
+    // 避免有人連按把整台車的中繼額度用光
+    var fxLog = store.get('fxLog', []);
+    if (!Array.isArray(fxLog)) fxLog = [];
+    function fxWait() {
+      var now = Date.now();
+      fxLog = fxLog.filter(function (t) { return now - t < 600000; });
+      var last = fxLog[fxLog.length - 1] || 0;
+      if (now - last < 6000) return Math.ceil((6000 - (now - last)) / 1000);
+      if (fxLog.length >= 10) return Math.ceil((600000 - (now - fxLog[0])) / 1000);
+      return 0;
+    }
     $('#gFx').replaceChildren.apply($('#gFx'), FX.map(function (f) {
       return el('button', { type: 'button', onclick: function () {
-        if (Date.now() - lastFxSent < 1500) return; // 省一點中繼服務的額度
-        lastFxSent = Date.now();
+        var w = fxWait();
+        if (w) { toast('音效冷卻中，' + (w > 60 ? Math.ceil(w / 60) + ' 分鐘' : w + ' 秒') + '後可以再按'); return; }
+        fxLog.push(Date.now()); store.set('fxLog', fxLog);
+        paintFx();
         sendMsg({ type: 'fx', fx: f.k }).then(function () { toast('已送出 ' + f.label); }, function (e) { toast(e.message); });
       } }, f.label);
     }));
+    var fxPaintTimer = null;
+    function paintFx() {
+      var w = fxWait();
+      Array.prototype.forEach.call($('#gFx').children, function (b) { b.classList.toggle('cool', !!w); });
+      clearTimeout(fxPaintTimer);
+      if (w) fxPaintTimer = setTimeout(paintFx, w * 1000 + 100); // 冷卻結束時恢復
+    }
+    paintFx();
 
-    function withdraw(it, li) {
-      li.style.opacity = '.4';
-      sendMsg({ type: 'del', k: it.k }).then(function () { toast('已撤回「' + it.t + '」'); }, function (e) { li.style.opacity = ''; toast(e.message); });
+    var withdrawing = Object.create(null);
+    function withdraw(it, btn, li) {
+      if (withdrawing[it.k]) return;
+      withdrawing[it.k] = 1;
+      btn.disabled = true; li.style.opacity = '.4';
+      setTimeout(function () { delete withdrawing[it.k]; if (lastState) renderState(lastState); }, 25000);
+      sendMsg({ type: 'del', k: it.k }).then(function () { toast('已送出撤回「' + it.t + '」'); }, function (e) {
+        delete withdrawing[it.k];
+        btn.disabled = false; li.style.opacity = '';
+        toast(e.message);
+      });
     }
 
     /* ----- 跟唱：照主機廣播的同步資訊自己推算時間，歌詞自己去 LRCLIB 抓 ----- */
@@ -1983,6 +2422,7 @@ h2 .mono { color: var(--accent); }
       G.vid = y.v; G.lid = y.l;
       $('#gSingSrc').textContent = '';
       if (y.l == null) { gClear('主機正在找「' + title + '」的歌詞…'); return; }
+      if (y.l === -1) { gClear('主機暫時載不到歌詞，恢復後會自動更新'); return; }
       if (!y.l) { gClear('這首沒有找到歌詞'); return; }
       gClear('載入歌詞中…');
       gLoad(y.l, 0);
@@ -2045,15 +2485,25 @@ h2 .mono { color: var(--accent); }
       track.style.transform = 'translateY(' + Math.round(y) + 'px)';
     }
     window.addEventListener('resize', gPosition);
+    // 跟唱區捲出畫面時不用畫（例如往下滑去搜尋）
+    var gVisible = true;
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(function (es) {
+        gVisible = es[es.length - 1].isIntersecting;
+        if (gVisible) gStart();
+      }).observe($('#gSingBox'));
+    }
     function gStart() {
+      // 跟唱中才讓手機螢幕常亮；放在 G.loop 判斷之前：切回前景時迴圈可能還算在跑，但鎖已經被系統收回
+      if (sing.open && G.sync && G.sync.p && G.lines.length) keepAwake();
       if (G.loop) return;
       G.loop = true;
       requestAnimationFrame(gTick);
     }
+    function gStop() { G.loop = false; releaseAwake(); }
     function gTick() {
-      // 收合、切到背景、沒歌詞時停掉，省電
-      if (!sing.open || document.hidden || !G.sync || !G.lines.length) { G.loop = false; return; }
-      requestAnimationFrame(gTick);
+      // 收合、切到背景、捲出畫面、沒歌詞時停掉，省電
+      if (!sing.open || document.hidden || !gVisible || !G.sync || !G.lines.length) { gStop(); return; }
       var t = gTime(), i = lineAt(G.lines, t);
       if (i !== G.idx) gSetIdx(i);
       gSetCue(cueText(G.lines, i, t));
@@ -2063,15 +2513,40 @@ h2 .mono { color: var(--accent); }
         var node = $('#gTrack').children[i];
         if (node) node.style.setProperty('--p', Math.min(1, Math.max(0, (t - cur.t) / span)).toFixed(3));
       }
+      // 主機暫停、或已經唱完最後一句：畫完這一格就停，下一則廣播會再叫醒
+      if (!G.sync.p || t > G.lines[G.lines.length - 1].t + 8) { gStop(); return; }
+      requestAnimationFrame(gTick);
     }
     document.addEventListener('visibilitychange', function () { if (!document.hidden) gStart(); });
 
+    // ntfy 會保留最後一則狀態約 12 小時：主機早就關掉時，不要把舊歌當成正在播
+    function isStale(m) {
+      var age = Date.now() - (+m.ts || 0), y = m.y;
+      if (age > 3 * 3600 * 1000) return true;
+      return !!(y && y.p && y.d && y.at + age / 1000 > y.d + 90); // 照理早就播完了卻沒有新狀態
+    }
+
     function renderState(m) {
+      $('#gFx').hidden = m.f === 0;
+      if (isStale(m)) {
+        sayHello(); // 主機也許剛開，叫一下
+        onSync(null, '');
+        nowItem = null; hostPlaying = false;
+        $('#gCtl').hidden = true;
+        paintFavNow();
+        $('#gNowTitle').textContent = '主機可能已經離線';
+        $('#gNowBy').textContent = '最後更新：' + fmtAgo(+m.ts || 0) + '。iPad 重新打開頁面後就會恢復';
+        $('#gCount').textContent = '';
+        $('#gQueue').replaceChildren(el('li', { class: 'empty' }, '等待主機上線'));
+        return;
+      }
+      lastFresh = Date.now();
       onSync(m.y || null, m.now ? m.now.t : '');
       nowItem = m.now && m.now.i ? { id: m.now.i, title: m.now.t, ch: m.now.c || '' } : null;
       hostPlaying = !!m.p;
+      if (armNext && (!nowItem || nowItem.id !== armVid)) disarmNext(); // 換歌了，取消準備切歌
       $('#gCtl').hidden = !nowItem;
-      $('#gPlay').textContent = hostPlaying ? '⏸ 暫停' : '▶ 播放';
+      paintPlay();
       paintFavNow();
       $('#gNowTitle').textContent = m.now ? m.now.t : '目前沒有歌，點第一首吧';
       $('#gNowBy').textContent = !m.now ? '' : m.now.b ? m.now.b + ' 點的' : m.now.a ? '自動推薦' : '';
@@ -2082,7 +2557,10 @@ h2 .mono { color: var(--accent); }
       var items = q.map(function (it) {
         var mine = it.k && myKeys.indexOf(it.k) !== -1;
         var li = el('li', { class: mine ? 'mine' : null }, el('div', { class: 'q-meta' }, el('div', { class: 'q-title' }, it.t), el('div', { class: 'q-by' }, it.b ? it.b + ' 點的' : it.a ? '自動推薦' : '')));
-        if (mine) li.append(el('div', { class: 'q-act' }, el('button', { type: 'button', onclick: function () { withdraw(it, li); } }, '撤回')));
+        if (mine) {
+          var btn = el('button', { type: 'button', disabled: withdrawing[it.k] ? '' : null, onclick: function () { withdraw(it, btn, li); } }, '撤回');
+          li.append(el('div', { class: 'q-act' }, btn));
+        }
         return li;
       });
       if (m.n > q.length) items.push(el('li', { class: 'empty' }, '還有 ' + (m.n - q.length) + ' 首'));
@@ -2095,31 +2573,64 @@ h2 .mono { color: var(--accent); }
       renderState(m);
     }, function (ok) {
       $('#gConn').textContent = ok ? '已連上' : '重新連線中…';
+      if (!ok) return;
+      // 連上（含重連）時，手上沒有最近 5 分鐘內的新狀態就打聲招呼；12 秒後還沒收到新狀態再試一次
+      var connectedAt = Date.now();
+      if (Date.now() - lastFresh > 5 * 60000) sayHello();
+      setTimeout(function () { if (lastFresh < connectedAt) sayHello(true); }, 12000);
     });
+
+    /* ----- 跟主機打招呼 -----
+       主機最近 6 小時沒看到乘客就不廣播（省額度），乘客要靠 hello 叫醒它。
+       60 秒內最多一次；失敗 15 秒後重試；頁面一直開著時，太久沒新狀態也會再叫一次。 */
+    var lastFresh = 0, lastHello = 0, helloTimer = null;
+    function sayHello(force) {
+      if (!force && Date.now() - lastHello < 60000) return;
+      lastHello = Date.now();
+      clearTimeout(helloTimer);
+      sendMsg({ type: 'hello' }).catch(function () {
+        lastHello = 0;
+        helloTimer = setTimeout(sayHello, 15000);
+      });
+    }
+    setInterval(function () {
+      if (document.hidden) return;
+      var quiet = Date.now() - lastFresh, since = Date.now() - lastHello;
+      if (since > 3 * 3600000 || (quiet > 30 * 60000 && since > 30 * 60000)) sayHello();
+    }, 5 * 60000);
 
     // 多首會自動分批送出，每批控制在中繼服務的訊息大小上限內，且不超過主機一次收的 MAX_BATCH 首
     function onAdd(items) {
       var by = $('#gName').value.trim().slice(0, 12);
       var enc = new TextEncoder(), chunks = [], cur = [];
       items.forEach(function (it) {
-        var x = { id: it.id, title: String(it.title).slice(0, 80), ch: String(it.ch || '').slice(0, 40) };
+        // 讀不到標題的送空字串，讓主機自己去查
+        var x = { id: it.id, title: it.bad ? '' : String(it.title).slice(0, 80), ch: String(it.ch || '').slice(0, 40) };
         var test = cur.concat([x]);
         if (cur.length && (test.length > MAX_BATCH || enc.encode(JSON.stringify({ type: 'add', rid: 'xxxxxxxxxxxx', by: by, items: test })).length > 3500)) {
           chunks.push(cur); cur = [x];
         } else cur = test;
       });
       if (cur.length) chunks.push(cur);
+      var sentIds = [];
       return chunks.reduce(function (p, chunk) {
         return p.then(function () {
           var rid = randId(12);
           return ntfyPub(topic + '-req', { type: 'add', rid: rid, by: by, items: chunk }).then(function () {
-            chunk.forEach(function (x, j) { myKeys.push(rid.slice(0, 5) + j.toString(36)); histSent.add(x); });
+            chunk.forEach(function (x, j) {
+              myKeys.push(rid.slice(0, 5) + j.toString(36));
+              if (x.title) histSent.add(x); // 讀不到歌名的先不記，免得「點過」裡出現暫時標題
+              sentIds.push(x.id);
+            });
             if (myKeys.length > 150) myKeys = myKeys.slice(-150);
             store.set('myKeys', myKeys);
             if (lastState) renderState(lastState);
           });
         });
-      }, Promise.resolve());
+      }, Promise.resolve()).catch(function (err) {
+        err.sentIds = sentIds; // 告訴點歌元件哪些已經送到，重試時只送剩下的
+        throw err;
+      });
     }
 
     mountPicker($('#gPicker'), {
