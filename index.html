@@ -626,11 +626,12 @@ h2 .mono { color: var(--accent); }
      2. 一次一個請求、中間隔 200～500ms
      3. 被 429 時照 Retry-After 等，不然可能被暫時封鎖
      但 429 回應沒有 CORS 標頭，瀏覽器只會看到「網路錯誤」、讀不到 Retry-After，
-     所以網路錯誤一律當成被限流：從 2 秒開始加倍退避（最多 60 秒），退避期間這台裝置完全不送。 */
+     所以網路錯誤一律當成被限流：從 1.5 秒開始加倍退避（最多 20 秒），退避期間這台裝置完全不送。
+     （實測伺服器給的 Retry-After 幾乎都是 1 秒，所以起始值不用設太長。） */
   var LRC_CLIENT = 'car-karaoke (https://github.com/asd87695git/car-karaoke)';
   var LRC = { chain: Promise.resolve(), last: 0, until: 0, backoff: 0 };
   function lrcLimited(ra) {
-    LRC.backoff = ra != null ? ra : Math.min(Math.max(LRC.backoff * 2, 2), 60);
+    LRC.backoff = ra != null ? ra : Math.min(Math.max(LRC.backoff * 2, 1.5), 20);
     LRC.until = Date.now() + LRC.backoff * 1000;
     var e = new Error('歌詞服務暫時限流，' + Math.ceil(LRC.backoff) + ' 秒後再試');
     e.retryAfter = LRC.backoff;
@@ -1693,33 +1694,33 @@ h2 .mono { color: var(--accent); }
       return qs;
     }
 
-    function findLyrics(title, author, dur) {
-      var queries = queriesFor(title, author).slice(0, 5), tried = {}, sent = 0, failed = 0;
-      var best = null, bestDiff = Infinity, plainFallback = null;
-      function step(i) {
-        if (i >= queries.length || (best && bestDiff <= 12)) {
-          if (best) { best._diff = bestDiff; return best; }
-          // 每次查詢都失敗（多半是被限流）≠ 找不到，丟錯讓外面顯示「連不上」並重試
-          if (!plainFallback && sent && failed === sent) throw new Error('lrclib unavailable');
-          return plainFallback;
+    // st：搜尋進度（查到第幾組、目前最佳結果）。被限流時把進度掛在錯誤上丟出去，
+    // 重試時傳回來，從被擋的那一組接著查，不用從頭再打一次。
+    function findLyrics(title, author, dur, st) {
+      st = st || { queries: queriesFor(title, author).slice(0, 5), i: 0, tried: {}, done: 0, failed: 0, best: null, bestDiff: Infinity, plain: null };
+      function step() {
+        if (st.i >= st.queries.length || (st.best && st.bestDiff <= 12)) {
+          if (st.best) { st.best._diff = st.bestDiff; return st.best; }
+          // 每次查詢都出錯 ≠ 找不到，丟錯讓外面顯示「連不上」並重試
+          if (!st.plain && st.done && st.failed === st.done) throw new Error('lrclib unavailable');
+          return st.plain;
         }
-        var key = JSON.stringify(queries[i]);
-        if (tried[key]) return step(i + 1);
-        tried[key] = 1;
-        sent++;
-        return lrcSearch(queries[i]).then(function (res) {
+        var q = st.queries[st.i], key = JSON.stringify(q);
+        if (st.tried[key]) { st.i++; return step(); }
+        return lrcSearch(q).then(function (res) {
           (res || []).forEach(function (r) {
             if (r.syncedLyrics) {
               var diff = dur ? Math.abs((r.duration || 0) - dur) : 0;
-              if (diff < bestDiff) { bestDiff = diff; best = r; }
-            } else if (r.plainLyrics && !plainFallback) plainFallback = r;
+              if (diff < st.bestDiff) { st.bestDiff = diff; st.best = r; }
+            } else if (r.plainLyrics && !st.plain) st.plain = r;
           });
-        }).catch(function (err) {
-          failed++;
-          if (err && err.retryAfter != null) throw err; // 被限流：剩下的查詢先不送
-        }).then(function () { return step(i + 1); });
+          st.tried[key] = 1; st.done++; st.i++;
+        }, function (err) {
+          if (err && err.retryAfter != null) { err.resume = st; throw err; } // 被限流：這一組待會重查
+          st.tried[key] = 1; st.done++; st.failed++; st.i++;
+        }).then(step);
       }
-      return step(0);
+      return step();
     }
 
     var lyrRetry = { vid: null, n: 0 };
@@ -1739,17 +1740,18 @@ h2 .mono { color: var(--accent); }
       var title = d.title || now.title, author = d.author || now.ch || '';
       var dur = player.getDuration ? player.getDuration() : 0;
       var p = picks[now.id] ? lrcGet(picks[now.id]) : Promise.resolve(null);
-      p.then(function (rec) { return rec || findLyrics(title, author, dur); })
+      p.then(function (rec) { return rec || findLyrics(title, author, dur, lyrRetry.st); })
         .then(function (rec) { if (rec) cacheLyrics(now.id, rec); if (L.vid === now.id) applyLyrics(rec); })
         .catch(function (err) {
           if (L.vid !== now.id) return;
+          if (err && err.resume) lyrRetry.st = err.resume; // 下次從被擋的那組接著查
           // 重試期間 L.rid 維持 null（乘客那邊顯示「主機正在找」），全部失敗才告訴乘客沒有歌詞
-          if (lyrRetry.n >= 4) { setSrc('歌詞服務連不上'); showMsg('歌詞服務暫時連不上，可以按下方「歌詞不對？」手動找'); L.rid = 0; broadcastSoon(); return; }
-          // 被限流就照退避時間（多等 1 秒），其他錯誤用固定間隔
-          var wait = err && err.retryAfter != null ? Math.ceil(err.retryAfter) + 1 : [8, 20, 45, 60][lyrRetry.n];
+          if (lyrRetry.n >= 6) { setSrc('歌詞服務連不上'); showMsg('歌詞服務暫時連不上，可以按下方「歌詞不對？」手動找'); L.rid = 0; broadcastSoon(); return; }
+          // 被限流就照退避時間（多等 0.5 秒），其他錯誤用固定間隔
+          var wait = err && err.retryAfter != null ? err.retryAfter + 0.5 : [5, 10, 20, 30, 45, 60][lyrRetry.n];
           lyrRetry.n++;
-          setSrc('歌詞服務連不上，' + wait + ' 秒後重試');
-          showMsg('歌詞服務暫時連不上，' + wait + ' 秒後自動重試…');
+          setSrc('歌詞服務忙碌，' + Math.ceil(wait) + ' 秒後重試');
+          showMsg('歌詞服務暫時忙碌，' + Math.ceil(wait) + ' 秒後自動重試…');
           setTimeout(function () { if (S.now && S.now.id === now.id && L.vid === now.id && !L.lines.length) loadLyrics(); }, wait * 1000);
         });
     }
