@@ -219,6 +219,8 @@ h2 .mono { color: var(--accent); }
 .result .add { flex: none; min-height: 38px; padding: 6px 12px; font-size: 14px; }
 .fav-tools { display: flex; gap: 6px; flex-wrap: wrap; }
 .fav-tools button { min-height: 36px; padding: 4px 12px; font-size: 13px; }
+.fav-tools > .hint { flex: 1; min-width: 0; align-self: center; }
+.search-modes button { flex: 1; }
 .actionbar {
   position: sticky; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); z-index: 5;
   display: flex; align-items: center; gap: 8px; padding: 8px;
@@ -561,32 +563,89 @@ h2 .mono { color: var(--accent); }
   }
 
   /* ---------- YouTube 搜尋 / 影片資訊 ---------- */
-  function ytSearch(q, key, n) {
-    var params = new URLSearchParams({
-      part: 'snippet', type: 'video', maxResults: String(n || 10), q: q, key: key,
-      videoEmbeddable: 'true', videoCategoryId: '10', regionCode: 'TW'
-    });
-    return fetch('https://www.googleapis.com/youtube/v3/search?' + params).catch(function () {
+  function ytApi(path, params) {
+    return fetch('https://www.googleapis.com/youtube/v3/' + path + '?' + new URLSearchParams(params)).catch(function () {
       throw new Error('沒有網路訊號，搜尋不到');
     }).then(function (r) {
-      return r.json().then(function (j) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
         if (!r.ok) {
           var reason = j && j.error && j.error.errors && j.error.errors[0] && j.error.errors[0].reason;
-          if (reason === 'quotaExceeded') throw new Error('今天的搜尋額度用完了，請改貼 YouTube 連結');
-          if (reason === 'keyInvalid' || reason === 'badRequest') throw new Error('搜尋金鑰無效，請主機檢查設定');
-          if (reason === 'ipRefererBlocked' || r.status === 403) throw new Error('金鑰不允許從這個網址使用，請檢查 Google Cloud 的網址限制');
-          throw new Error('搜尋失敗，請改貼連結');
+          var err;
+          if (reason === 'quotaExceeded') err = new Error('今天的搜尋額度用完了，請改貼 YouTube 連結');
+          else if (reason === 'keyInvalid' || reason === 'badRequest') err = new Error('搜尋金鑰無效，請主機檢查設定');
+          else if (reason === 'ipRefererBlocked' || r.status === 403) err = new Error('金鑰不允許從這個網址使用，請檢查 Google Cloud 的網址限制');
+          else err = new Error('搜尋失敗，請改貼連結');
+          err.reason = reason || '';
+          throw err;
         }
-        return (j.items || []).filter(function (it) { return it.id && it.id.videoId; }).map(function (it) {
-          return {
-            id: it.id.videoId,
-            title: decodeHtml(it.snippet.title),
-            ch: decodeHtml(it.snippet.channelTitle || ''),
-            thumb: (it.snippet.thumbnails && it.snippet.thumbnails['default'] && it.snippet.thumbnails['default'].url) || thumbOf(it.id.videoId)
-          };
-        });
+        return j;
       });
     });
+  }
+  function ytItem(id, sn) {
+    return {
+      id: id,
+      title: decodeHtml(sn.title),
+      ch: decodeHtml(sn.channelTitle || ''),
+      thumb: (sn.thumbnails && sn.thumbnails['default'] && sn.thumbnails['default'].url) || thumbOf(id)
+    };
+  }
+
+  function ytSearch(q, key, n) {
+    return ytApi('search', {
+      part: 'snippet', type: 'video', maxResults: String(n || 10), q: q, key: key,
+      videoEmbeddable: 'true', videoCategoryId: '10', regionCode: 'TW'
+    }).then(function (j) {
+      return (j.items || []).filter(function (it) { return it.id && it.id.videoId && okId(it.id.videoId); }).map(function (it) {
+        return ytItem(it.id.videoId, it.snippet);
+      });
+    });
+  }
+
+  /* ---------- 排行榜 ----------
+     videos.list chart=mostPopular 每次只扣 1 單位（搜尋是 100）。
+     2025-07 YouTube 收掉「發燒影片」頁後，這個榜改成取自 YouTube 的音樂／電影／遊戲熱門榜，加上音樂分類就是台灣熱門音樂。
+     結果存在這台裝置 3 小時，乘客手機各自抓也只扣 1。 */
+  var CHART_TTL = 3 * 3600 * 1000;
+  var chartLoading = null;
+  function chartCached() {
+    var c = store.get('chart', null);
+    return c && Array.isArray(c.items) && c.at > Date.now() - CHART_TTL ? c : null;
+  }
+  function ytChart(key, force) {
+    var c = !force && chartCached();
+    if (c) return Promise.resolve(c);
+    if (chartLoading) return chartLoading;
+    var base = { part: 'snippet,status', chart: 'mostPopular', regionCode: 'TW', maxResults: '50', key: key };
+    chartLoading = ytApi('videos', Object.assign({ videoCategoryId: '10' }, base)).catch(function (err) {
+      // 有些地區不提供分類榜，退回不分類的熱門榜
+      if (err.reason === 'notFound' || err.reason === 'invalidCategoryId') return ytApi('videos', base);
+      throw err;
+    }).then(function (j) {
+      // r：YouTube 原本的名次（不能嵌入的歌濾掉後，後面的名次不往前補）
+      var items = (j.items || []).map(function (it, i) {
+        if (!it.id || !okId(it.id) || (it.status && it.status.embeddable === false)) return null;
+        var x = ytItem(it.id, it.snippet);
+        return { id: x.id, title: x.title, ch: x.ch, r: i + 1 };
+      }).filter(Boolean);
+      var out = { at: Date.now(), items: items };
+      if (items.length) store.set('chart', out);
+      return out;
+    });
+    chartLoading.then(function () { chartLoading = null; }, function () { chartLoading = null; });
+    return chartLoading;
+  }
+
+  /* ---------- KTV 版搜尋 ----------
+     搜尋時自動在關鍵字後面加上「KTV」或「伴奏」；英文歌改加 karaoke／instrumental。
+     關鍵字裡本來就有這類字就不重複加。 */
+  var KTV_WORDS = /ktv|karaoke|卡拉\s*ok|伴奏|伴唱|無人聲|消音|導唱|instrumental|off\s*vocal/i;
+  var SEARCH_MODES = [['', '原版'], ['ktv', 'KTV 版'], ['inst', '純伴奏']];
+  function withMode(q, m) {
+    if (!m || KTV_WORDS.test(q)) return q;
+    var cjk = /[㐀-鿿]/.test(q);
+    if (m === 'ktv') return q + (cjk ? ' KTV' : ' karaoke');
+    return q + (cjk ? ' 伴奏' : ' instrumental');
   }
 
   /* ---------- 推薦 ----------
@@ -1080,23 +1139,62 @@ h2 .mono { color: var(--accent); }
     var tabFav = el('button', { type: 'button', role: 'tab', class: 'tab' }, '我的最愛', favCount);
     var hist = opts.hist, histSort = 'recent';
     var tabHist = hist ? el('button', { type: 'button', role: 'tab', class: 'tab' }, opts.histLabel || '唱過') : null;
+    // 排行榜要有金鑰才能抓；chartState：'' / 'loading' / 'error'
+    var tabChart = el('button', { type: 'button', role: 'tab', class: 'tab' }, '排行');
+    var chart = chartCached(), chartState = '', chartErr = '';
+    var searchMode = store.get('searchMode', '');
+    if (!SEARCH_MODES.some(function (m) { return m[0] === searchMode; })) searchMode = '';
     var input = el('input', { type: 'search', id: opts.prefix + 'Input', enterkeyhint: 'search', 'aria-label': '搜尋歌名或貼上 YouTube 連結' });
     var form = el('form', { class: 'search', autocomplete: 'off' }, input, el('button', { type: 'submit', class: opts.primary ? 'primary' : null }, '找'));
+    var modeBar = el('div', { class: 'fav-tools search-modes', role: 'group', 'aria-label': '搜尋版本' });
     var hint = el('p', { class: 'hint' });
-    var searchPane = el('div', { class: 'picker' }, form, hint);
+    var searchPane = el('div', { class: 'picker' }, form, modeBar, hint);
     var tools = el('div', { class: 'fav-tools' });
     var list = el('div', { class: 'results' });
     var bar = el('div', { class: 'actionbar', hidden: '' });
-    root.replaceChildren(el('div', { class: 'tabs', role: 'tablist' }, tabSearch, tabFav, tabHist), searchPane, tools, list, bar);
+    root.replaceChildren(el('div', { class: 'tabs', role: 'tablist' }, tabSearch, tabFav, tabChart, tabHist), searchPane, tools, list, bar);
 
     function setPlaceholder() {
       input.placeholder = opts.key() ? '搜尋歌名，或貼一個或多個連結' : '貼上一個或多個 YouTube 連結';
+      modeBar.hidden = !opts.key();
+      tabChart.hidden = !opts.key();
+      if (!opts.key() && mode === 'chart') { mode = 'search'; render(); }
     }
+
+    function renderModes() {
+      modeBar.replaceChildren.apply(modeBar, SEARCH_MODES.map(function (m) {
+        return el('button', { type: 'button', class: searchMode === m[0] ? 'primary' : null, 'aria-pressed': String(searchMode === m[0]),
+          onclick: function () {
+            if (searchMode === m[0]) return;
+            searchMode = m[0]; store.set('searchMode', searchMode); renderModes();
+            // 已經搜過的關鍵字直接用新版本再搜一次
+            if (input.value.trim() && results.length && !allVideoIds(input.value).length) {
+              if (form.requestSubmit) form.requestSubmit(); else form.dispatchEvent(new Event('submit', { cancelable: true }));
+            }
+          } }, m[1]);
+      }));
+    }
+    renderModes();
     setPlaceholder();
 
     tabSearch.addEventListener('click', function () { mode = 'search'; sel = {}; render(); });
     tabFav.addEventListener('click', function () { mode = 'fav'; sel = {}; render(); });
+    tabChart.addEventListener('click', function () { mode = 'chart'; sel = {}; render(); loadChart(false); });
     if (tabHist) tabHist.addEventListener('click', function () { mode = 'hist'; sel = {}; render(); });
+
+    function loadChart(force) {
+      var key = opts.key();
+      if (!key || chartState === 'loading') return;
+      if (!force && chartCached()) { chart = chartCached(); return render(); }
+      chartState = 'loading'; render();
+      ytChart(key, force).then(function (c) {
+        chart = c; chartState = '';
+        render();
+      }, function (err) {
+        chartState = 'error'; chartErr = err.message;
+        render();
+      });
+    }
 
     form.addEventListener('submit', function (e) {
       e.preventDefault();
@@ -1104,7 +1202,8 @@ h2 .mono { color: var(--accent); }
       var q = input.value.trim();
       if (!q) return;
       var ids = allVideoIds(q), key = opts.key();
-      var qk = q.toLowerCase().replace(/\s+/g, ' ');
+      var sq = withMode(q, searchMode), added = sq !== q;
+      var qk = sq.toLowerCase().replace(/\s+/g, ' ');
       // 關鍵字搜尋還在跑：直接擋掉，不要動到進行中那一次的結果
       if (!ids.length && key && !qCache[qk] && searching) { hint.textContent = '上一個搜尋還在找，等一下'; return; }
       hint.classList.remove('bad');
@@ -1128,7 +1227,7 @@ h2 .mono { color: var(--accent); }
       if (qCache[qk]) { showResults(qCache[qk]); return; }
       searching = true;
       hint.textContent = '搜尋中…';
-      ytSearch(q, key, 5).then(function (items) {
+      ytSearch(sq, key, 5).then(function (items) {
         searching = false;
         qCache[qk] = items;
         if (seq !== searchSeq) return;
@@ -1142,7 +1241,9 @@ h2 .mono { color: var(--accent); }
       function showResults(items) {
         results = items;
         recSeed = items[0] || null;
-        hint.textContent = items.length ? '' : '找不到，換個關鍵字試試';
+        var tag = added ? '「' + sq.slice(q.length).trim() + '」' : '';
+        hint.textContent = items.length ? (tag ? '已自動加上' + tag + '一起搜' : '')
+          : tag ? '加上' + tag + '找不到，可以切回「原版」試試' : '找不到，換個關鍵字試試';
         render();
       }
     });
@@ -1255,13 +1356,17 @@ h2 .mono { color: var(--accent); }
       tabSearch.setAttribute('aria-selected', String(mode === 'search'));
       tabFav.setAttribute('aria-selected', String(mode === 'fav'));
       if (tabHist) tabHist.setAttribute('aria-selected', String(mode === 'hist'));
+      tabChart.setAttribute('aria-selected', String(mode === 'chart'));
       searchPane.hidden = mode !== 'search';
       tools.hidden = mode === 'search' || (mode === 'fav' && !favs.length);
       var histItems = mode === 'hist' ? hist.list(histSort).map(function (r) {
         var when = histSort === 'top' ? r.n + ' 次' : fmtAgo(r.last);
         return { id: r.id, title: r.title, ch: r.ch, sub: [r.ch, when].filter(Boolean).join(' · ') };
       }) : [];
-      var items = mode === 'search' ? results : mode === 'hist' ? histItems : favs;
+      var chartItems = mode === 'chart' && chart ? chart.items.map(function (it, i) {
+        return { id: it.id, title: it.title, ch: it.ch, sub: '第 ' + (it.r || i + 1) + ' 名 · ' + it.ch };
+      }) : [];
+      var items = mode === 'search' ? results : mode === 'hist' ? histItems : mode === 'chart' ? chartItems : favs;
       var extra = mode === 'search' ? recs : [];
       var valid = {};
       items.concat(extra).forEach(function (it) { valid[it.id] = 1; });
@@ -1282,9 +1387,17 @@ h2 .mono { color: var(--accent); }
           return el('button', { type: 'button', class: histSort === o[0] ? 'primary' : null, 'aria-pressed': String(histSort === o[0]),
             onclick: function () { histSort = o[0]; sel = {}; render(); } }, o[1]);
         }));
+      } else if (mode === 'chart') {
+        var status = chartState === 'loading' ? '讀取中…' : chartState === 'error' ? chartErr
+          : chart ? 'YouTube 台灣熱門音樂 · ' + fmtAgo(chart.at) + '更新' : '';
+        tools.replaceChildren(
+          el('span', { class: 'hint' + (chartState === 'error' ? ' bad' : '') }, status),
+          el('button', { type: 'button', disabled: chartState === 'loading' ? '' : null, onclick: function () { loadChart(true); } }, '重新整理'));
       }
 
-      if (mode === 'hist' && !items.length) {
+      if (mode === 'chart' && !items.length) {
+        list.replaceChildren(el('p', { class: 'hint empty-fav' }, chartState === 'loading' ? '' : chartState === 'error' ? '排行榜讀不到，等一下按「重新整理」再試' : '排行榜目前是空的'));
+      } else if (mode === 'hist' && !items.length) {
         list.replaceChildren(el('p', { class: 'hint empty-fav' }, opts.histEmpty || '還沒有紀錄'));
       } else if (mode === 'fav' && !favs.length) {
         list.replaceChildren(
@@ -2008,10 +2121,10 @@ h2 .mono { color: var(--accent); }
       setSrc('');
     }
 
-    var JUNK = /(official\s*(music\s*|live\s*|lyrics?\s*)?video|official\s*(mv|audio)|(music|live|lyrics?)\s*video|官方完整版|官方版|官方\s*MV|完整版\s*MV|高畫質|動態歌詞|歌詞版|\bM\/?V\b|\bHD\b|\b4K\b)/gi;
+    var JUNK = /(official\s*(music\s*|live\s*|lyrics?\s*)?video|official\s*(mv|audio)|(music|live|lyrics?)\s*video|官方完整版|官方版|官方\s*MV|完整版\s*MV|高畫質|動態歌詞|歌詞版|\bM\/?V\b|\bHD\b|\b4K\b|KTV\s*(伴唱|伴奏|導唱)?\s*[版帶]?|卡拉\s*OK\s*版?|karaoke(\s*version)?|純?伴奏\s*版?|伴唱\s*[版帶]?|導唱\s*版?|無人聲\s*版?|消音\s*版?|\binst(rumental)?\b|off\s*vocal)/gi;
     function cleanTitle(t) {
       return String(t)
-        .replace(/[(\[（【][^)\]）】]*?(official|mv|m\/v|lyric|video|audio|hd|4k|官方|完整版|歌詞|動態|高畫質|live)[^)\]）】]*[)\]）】]/gi, ' ')
+        .replace(/[(\[（【][^)\]）】]*?(official|mv|m\/v|lyric|video|audio|hd|4k|官方|完整版|歌詞|動態|高畫質|live|ktv|karaoke|卡拉|伴奏|伴唱|導唱|人聲|消音|instrumental|off\s*vocal)[^)\]）】]*[)\]）】]/gi, ' ')
         .replace(JUNK, ' ')
         .replace(/[|｜].*$/, ' ')
         .replace(/[【】《》「」『』\[\]"“”]/g, ' ')
