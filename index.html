@@ -667,6 +667,10 @@ h2 .mono { color: var(--accent); }
     if (/ - Topic$/.test(ch)) return ch.replace(/ - Topic$/, '').trim();
     var t = String(title || '').replace(/^\s*[【\[(（][^】\]）)]{0,10}[】\]）)]\s*/, '');
     var m = t.match(/^\s*([^-–—《【「『|｜]{1,30}?)\s*(?:\s[-–—]\s|《|【|「|『)/);
+    // KTV 版常寫成「周杰倫-晴天(KTV)」，橫線兩邊沒空白；頻道又是 KTV 業者，不是歌手
+    var ktv = KTV_WORDS.test(t) || KTV_WORDS.test(ch);
+    if (!m && ktv) m = t.match(/^\s*([^-–—《【「『|｜()（）]{1,20}?)\s*[-–—]/);
+    if (!m && ktv) return '';
     var a = m ? m[1] : ch.replace(/(官方頻道|官方|Official|VEVO|YouTube Channel|Channel)/gi, '');
     if (/[㐀-鿿]/.test(a)) a = a.replace(/\s+[A-Za-z][\w\s'’.&]*$/, '');
     a = a.replace(/\s+/g, ' ').trim();
@@ -674,12 +678,13 @@ h2 .mono { color: var(--accent); }
   }
 
   var recCache = Object.create(null);
-  // 回傳最多 n 首推薦，排除 exclude（影片 id 陣列）裡的歌
-  function ytRecommend(seed, key, exclude, n) {
+  // 回傳最多 n 首推薦，排除 exclude（影片 id 陣列）裡的歌；mode 是搜尋版本（KTV 版、純伴奏），照樣加在歌手名後面
+  function ytRecommend(seed, key, exclude, n, mode) {
     var artist = guessArtist(seed.title, seed.ch);
     if (!artist || !key) return Promise.resolve([]);
-    var got = recCache[artist] || (recCache[artist] = ytSearch(artist, key, 25).catch(function (err) {
-      delete recCache[artist];
+    var q = withMode(artist, mode);
+    var got = recCache[q] || (recCache[q] = ytSearch(q, key, 25).catch(function (err) {
+      delete recCache[q];
       throw err;
     }));
     return got.then(function (items) {
@@ -1262,7 +1267,7 @@ h2 .mono { color: var(--accent); }
       var key = opts.key(), seq = searchSeq;
       if (!recSeed || !key || recState === 'loading') return;
       recState = 'loading'; render();
-      ytRecommend(recSeed, key, results.map(function (it) { return it.id; }), 5).then(function (more) {
+      ytRecommend(recSeed, key, results.map(function (it) { return it.id; }), 5, searchMode).then(function (more) {
         if (seq !== searchSeq) return;
         recs = more;
         recState = more.length ? 'done' : 'empty';
@@ -1277,7 +1282,10 @@ h2 .mono { color: var(--accent); }
 
     function recBlock() {
       if (mode !== 'search' || !recSeed || !results.length) return [];
-      if (recs.length) return [el('h3', {}, '你可能喜歡')].concat(recs.map(row));
+      if (recs.length) {
+        var ml = searchMode ? SEARCH_MODES.filter(function (m) { return m[0] === searchMode; })[0][1] : '';
+        return [el('h3', {}, '你可能喜歡' + (ml ? '（' + ml + '）' : ''))].concat(recs.map(row));
+      }
       var label = { loading: '找推薦中…', empty: '沒找到其他推薦', error: '推薦載入失敗，再按一次' }[recState] || '看看你可能喜歡的';
       return [el('button', { type: 'button', class: 'more-recs', disabled: recState === 'loading' || recState === 'empty' ? '' : null, onclick: loadRecs }, label)];
     }
@@ -1838,7 +1846,8 @@ h2 .mono { color: var(--accent); }
         var seeds = played.filter(function (x) { return !x.auto; }).slice(-5);
         if (!seeds.length) seeds = played.slice(-1);
         var seed = seeds[Math.floor(Math.random() * seeds.length)];
-        p = seed ? ytRecommend(seed, apiKey, Object.keys(recent), 10) : Promise.resolve([]);
+        // 跟著 iPad 點歌元件目前選的版本（KTV 版、純伴奏）
+        p = seed ? ytRecommend(seed, apiKey, Object.keys(recent), 10, store.get('searchMode', '')) : Promise.resolve([]);
       } else p = Promise.resolve([]);
       recBusy = true;
       p.catch(function () { return []; }).then(function (list) {
