@@ -225,6 +225,7 @@ h2 .mono { color: var(--accent); }
 .fav-tools button { min-height: 36px; padding: 4px 12px; font-size: 13px; }
 .fav-tools > .hint { flex: 1; min-width: 0; align-self: center; }
 .search-modes button { flex: 1; }
+.fav-tools > .search-modes { flex: 1 1 100%; }
 .actionbar {
   position: sticky; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); z-index: 5;
   display: flex; align-items: center; gap: 8px; padding: 8px;
@@ -656,6 +657,17 @@ h2 .mono { color: var(--accent); }
     var cjk = /[㐀-鿿]/.test(q);
     if (m === 'ktv') return q + (cjk ? ' KTV' : ' karaoke');
     return q + (cjk ? ' 伴奏' : ' instrumental');
+  }
+
+  var JUNK = /(official\s*(music\s*|live\s*|lyrics?\s*)?video|official\s*(mv|audio)|(music|live|lyrics?)\s*video|官方完整版|官方版|官方\s*MV|完整版\s*MV|高畫質|動態歌詞|歌詞版|\bM\/?V\b|\bHD\b|\b4K\b|KTV\s*(伴唱|伴奏|導唱)?\s*[版帶]?|卡拉\s*OK\s*版?|karaoke(\s*version)?|純?伴奏\s*版?|伴唱\s*[版帶]?|導唱\s*版?|無人聲\s*版?|消音\s*版?|\binst(rumental)?\b|off\s*vocal)/gi;
+  function cleanTitle(t) {
+    return String(t)
+      .replace(/[(\[（【][^)\]）】]*?(official|mv|m\/v|lyric|video|audio|hd|4k|官方|完整版|歌詞|動態|高畫質|live|ktv|karaoke|卡拉|伴奏|伴唱|導唱|人聲|消音|instrumental|off\s*vocal)[^)\]）】]*[)\]）】]/gi, ' ')
+      .replace(JUNK, ' ')
+      .replace(/[|｜].*$/, ' ')
+      .replace(/[【】《》「」『』\[\]"“”]/g, ' ')
+      .replace(/\s[-–—~]\s/g, ' ')
+      .replace(/\s+/g, ' ').trim();
   }
 
   /* ---------- 推薦 ----------
@@ -1176,18 +1188,28 @@ h2 .mono { color: var(--accent); }
       if (!opts.key() && mode === 'chart') { mode = 'search'; render(); }
     }
 
-    function renderModes() {
-      modeBar.replaceChildren.apply(modeBar, SEARCH_MODES.map(function (m) {
+    // 搜尋分頁和排行分頁都有一排版本切換
+    function modeButtons() {
+      return SEARCH_MODES.map(function (m) {
         return el('button', { type: 'button', class: searchMode === m[0] ? 'primary' : null, 'aria-pressed': String(searchMode === m[0]),
           onclick: function () {
             if (searchMode === m[0]) return;
             searchMode = m[0]; store.set('searchMode', searchMode); renderModes();
+            if (mode === 'chart') { sel = {}; render(); return; }
             // 已經搜過的關鍵字直接用新版本再搜一次
-            if (input.value.trim() && results.length && !allVideoIds(input.value).length) {
-              if (form.requestSubmit) form.requestSubmit(); else form.dispatchEvent(new Event('submit', { cancelable: true }));
-            }
+            if (input.value.trim() && results.length && !allVideoIds(input.value).length) submitSearch();
           } }, m[1]);
-      }));
+      });
+    }
+    function renderModes() { modeBar.replaceChildren.apply(modeBar, modeButtons()); }
+    function submitSearch() {
+      if (form.requestSubmit) form.requestSubmit(); else form.dispatchEvent(new Event('submit', { cancelable: true }));
+    }
+    // 排行榜的歌：用清掉 MV 雜字的歌名，照目前的版本去搜
+    function findVersion(it) {
+      input.value = cleanTitle(it.title) || it.title;
+      mode = 'search'; sel = {}; render();
+      submitSearch();
     }
     renderModes();
     setPlaceholder();
@@ -1334,15 +1356,19 @@ h2 .mono { color: var(--accent); }
       }
       var add = el('button', { type: 'button', class: 'add' }, '點');
       add.addEventListener('click', function () { send([it]); });
+      var label = el('label', { for: cbId, class: 'r-label' },
+        el('img', { src: it.thumb || thumbOf(it.id), alt: '', loading: 'lazy' }),
+        el('span', { class: 'r-meta' }, el('span', { class: 'r-title' }, it.title), el('span', { class: 'r-ch' }, it.sub || it.ch || '')));
+      // 排行榜是原版 MV：選了 KTV 版／純伴奏時，改成按了才用歌名去搜那個版本（一次扣 100，不預先全部換）
+      if (mode === 'chart' && searchMode) {
+        var ml = SEARCH_MODES.filter(function (m) { return m[0] === searchMode; })[0][1];
+        return el('div', { class: 'result' }, label, side,
+          el('button', { type: 'button', class: 'add', onclick: function () { findVersion(it); } }, '找 ' + ml));
+      }
       // 插：排到待播第一首，下一首就播
       var cut = el('button', { type: 'button', class: 'add cut', 'aria-label': '插播「' + it.title + '」' }, '插');
       cut.addEventListener('click', function () { send([it], true); });
-      return el('div', { class: 'result' },
-        cb,
-        el('label', { for: cbId, class: 'r-label' },
-          el('img', { src: it.thumb || thumbOf(it.id), alt: '', loading: 'lazy' }),
-          el('span', { class: 'r-meta' }, el('span', { class: 'r-title' }, it.title), el('span', { class: 'r-ch' }, it.sub || it.ch || ''))),
-        side, cut, add);
+      return el('div', { class: 'result' }, cb, label, side, cut, add);
     }
 
     function renderBar() {
@@ -1411,8 +1437,9 @@ h2 .mono { color: var(--accent); }
         }));
       } else if (mode === 'chart') {
         var status = chartState === 'loading' ? '讀取中…' : chartState === 'error' ? chartErr
-          : chart ? 'YouTube 台灣熱門音樂 · ' + fmtAgo(chart.at) + '更新' : '';
+          : chart ? 'YouTube 台灣熱門音樂 · ' + fmtAgo(chart.at) + '更新' + (searchMode ? '。按「找」會用歌名再搜一次' : '') : '';
         tools.replaceChildren(
+          el.apply(null, ['div', { class: 'fav-tools search-modes', role: 'group', 'aria-label': '排行榜要找的版本' }].concat(modeButtons())),
           el('span', { class: 'hint' + (chartState === 'error' ? ' bad' : '') }, status),
           el('button', { type: 'button', disabled: chartState === 'loading' ? '' : null, onclick: function () { loadChart(true); } }, '重新整理'));
       }
@@ -2150,16 +2177,6 @@ h2 .mono { color: var(--accent); }
       setSrc('');
     }
 
-    var JUNK = /(official\s*(music\s*|live\s*|lyrics?\s*)?video|official\s*(mv|audio)|(music|live|lyrics?)\s*video|官方完整版|官方版|官方\s*MV|完整版\s*MV|高畫質|動態歌詞|歌詞版|\bM\/?V\b|\bHD\b|\b4K\b|KTV\s*(伴唱|伴奏|導唱)?\s*[版帶]?|卡拉\s*OK\s*版?|karaoke(\s*version)?|純?伴奏\s*版?|伴唱\s*[版帶]?|導唱\s*版?|無人聲\s*版?|消音\s*版?|\binst(rumental)?\b|off\s*vocal)/gi;
-    function cleanTitle(t) {
-      return String(t)
-        .replace(/[(\[（【][^)\]）】]*?(official|mv|m\/v|lyric|video|audio|hd|4k|官方|完整版|歌詞|動態|高畫質|live|ktv|karaoke|卡拉|伴奏|伴唱|導唱|人聲|消音|instrumental|off\s*vocal)[^)\]）】]*[)\]）】]/gi, ' ')
-        .replace(JUNK, ' ')
-        .replace(/[|｜].*$/, ' ')
-        .replace(/[【】《》「」『』\[\]"“”]/g, ' ')
-        .replace(/\s[-–—~]\s/g, ' ')
-        .replace(/\s+/g, ' ').trim();
-    }
     function stripTrailingEnglish(s) {
       return /[㐀-鿿]/.test(s) ? s.replace(/\s+[A-Za-z0-9][\w\s'’!?.,&()-]*$/, '').trim() : s.trim();
     }

@@ -47,6 +47,7 @@
   - 搜尋版本切換「原版／KTV 版／純伴奏」（`kdesk:searchMode`，每台裝置各自記住）：`withMode()` 自動在關鍵字後加「KTV」「伴奏」，英文歌改加 karaoke／instrumental；關鍵字已含這類字（`KTV_WORDS`）就不加。切換時如果剛搜過，會用新版本再搜一次（多扣 100）。
   - 歌詞查詢的 `JUNK`／`cleanTitle()` 會把 KTV、卡拉OK、伴奏、伴唱、無人聲、消音、karaoke、instrumental 等字拿掉，KTV 版影片也查得到歌詞（KTV 版前奏長度可能不同，需要時用對拍）。
 - 排行分頁（有金鑰才顯示）：`videos.list?chart=mostPopular&regionCode=TW&videoCategoryId=10`，每次只扣 1 單位，取 50 首、濾掉不能嵌入的（名次保留原本的）。2025-07 YouTube 收掉發燒影片頁後，這個榜改取自 YouTube 音樂／電影／遊戲熱門榜。結果存 `kdesk:chart` 3 小時，「重新整理」強制重抓；分類榜回 notFound 時退回不分類。
+  - 排行分頁也有版本切換。選 KTV 版／純伴奏時，每首的「插／點」換成「找 KTV 版」：用 `cleanTitle()` 清過的歌名切到搜尋分頁搜那個版本（一次扣 100，刻意不預先把 50 首都換掉）。`JUNK`／`cleanTitle()` 因此搬到共用區（主機歌詞與點歌元件共用）。
 - 推薦：YouTube 已停用 `relatedToVideoId`，改成 `guessArtist()` 從標題／頻道猜歌手，再用歌手名搜尋（`ytRecommend()`，同歌手結果在記憶體暫存）。
   - 「你可能喜歡」是按鈕，按了才搜（多扣 100），刻意不自動載入以省額度。
   - 推薦跟著搜尋版本走：選 KTV 版／純伴奏時搜「歌手 KTV」「歌手 伴奏」（`ytRecommend(…, mode)`，快取 key 是加過字的關鍵字），標題顯示「你可能喜歡（KTV 版）」；主機自動推薦讀 `kdesk:searchMode`。
