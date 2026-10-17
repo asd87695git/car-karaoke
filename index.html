@@ -188,6 +188,7 @@ h2 .mono { color: var(--accent); }
 .api-notes { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; line-height: 1.5; }
 .api-notes b { color: var(--fg); font-weight: 700; }
 .api-notes a { color: var(--accent); margin-left: 4px; }
+.api-notes ul { margin: 4px 0 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; list-style: circle; }
 .conn-badge { margin-left: 8px; font-weight: 500; letter-spacing: 0; color: var(--bad); }
 .fx button.cool { opacity: .45; }
 .settings .check { display: flex; align-items: center; gap: 10px; min-height: 36px; cursor: pointer; }
@@ -380,7 +381,14 @@ h2 .mono { color: var(--accent); }
       <h2>用到的服務與免費額度</h2>
       <ul class="api-notes">
         <li><b>YouTube Data API</b>（搜尋、推薦、排行榜）：每天 10,000 單位，搜尋一次扣 100（約 100 次），排行榜一次扣 1。台灣時間約 15:00 重置（冬令時間 16:00）。乘客用同一把金鑰，全車共用。<a href="https://console.cloud.google.com/apis/api/youtube.googleapis.com/quotas" target="_blank" rel="noopener">查看用量</a></li>
-        <li><b>ntfy.sh</b>（點歌、遙控、音效、同步）：免費匿名，每個 IP 每天 250 則，單則約 4KB。共用同一個熱點時全車一起算。</li>
+        <li><b>ntfy.sh</b>（點歌、遙控、音效、同步）：免費匿名，每個 IP 每天 250 則，單則約 4KB。共用同一個熱點時全車一起算。
+          <ul>
+            <li>只算「送出」的訊息，接收不扣。額度用完 iPad 播放、歌詞、搜尋點歌都照常；手機搜尋也照常（直接用 YouTube）。</li>
+            <li>iPad 的 IP 用完：手機收不到正在播放、待播清單、跟唱同步，但手機點的歌 iPad 還收得到。</li>
+            <li>手機的 IP 用完：手機送不出點歌、插播、撤回、遙控、音效。</li>
+            <li>約 12 小時內慢慢恢復。急用時讓手機改用自己的行動網路（換 IP 就是另一份 250 則），或直接在 iPad 點歌。</li>
+          </ul>
+        </li>
         <li><b>LRCLIB</b>（同步歌詞）：免費、不用金鑰，沒有公布額度；尖峰時常被限流，會自動等待重試。</li>
       </ul>
     </details>
