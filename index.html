@@ -185,6 +185,9 @@ h2 .mono { color: var(--accent); }
 .settings summary { cursor: pointer; font-size: 13px; font-weight: 700; letter-spacing: .08em; color: var(--muted); min-height: 32px; }
 .settings label { font-size: 14px; font-weight: 500; }
 .settings h2 { margin-top: 6px; }
+.api-notes { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.api-notes b { color: var(--fg); font-weight: 700; }
+.api-notes a { color: var(--accent); margin-left: 4px; }
 .conn-badge { margin-left: 8px; font-weight: 500; letter-spacing: 0; color: var(--bad); }
 .fx button.cool { opacity: .45; }
 .settings .check { display: flex; align-items: center; gap: 10px; min-height: 36px; cursor: pointer; }
@@ -217,6 +220,7 @@ h2 .mono { color: var(--accent); }
 .star, .icon { min-height: 40px; min-width: 40px; padding: 0; flex: none; background: transparent; border-color: transparent; color: var(--muted); font-size: 18px; }
 .star.on { color: var(--accent); }
 .result .add { flex: none; min-height: 38px; padding: 6px 12px; font-size: 14px; }
+.result .cut { color: var(--accent); }
 .fav-tools { display: flex; gap: 6px; flex-wrap: wrap; }
 .fav-tools button { min-height: 36px; padding: 4px 12px; font-size: 13px; }
 .fav-tools > .hint { flex: 1; min-width: 0; align-self: center; }
@@ -372,6 +376,12 @@ h2 .mono { color: var(--accent); }
       <label class="check"><input type="checkbox" id="fxAllow"> 允許乘客遠端播放音效</label>
       <button id="newTopic" type="button">換一組點歌碼</button>
       <p class="hint">換了之後舊的 QR Code 會失效，乘客要重新掃。</p>
+      <h2>用到的服務與免費額度</h2>
+      <ul class="api-notes">
+        <li><b>YouTube Data API</b>（搜尋、推薦、排行榜）：每天 10,000 單位，搜尋一次扣 100（約 100 次），排行榜一次扣 1。台灣時間約 15:00 重置（冬令時間 16:00）。乘客用同一把金鑰，全車共用。<a href="https://console.cloud.google.com/apis/api/youtube.googleapis.com/quotas" target="_blank" rel="noopener">查看用量</a></li>
+        <li><b>ntfy.sh</b>（點歌、遙控、音效、同步）：免費匿名，每個 IP 每天 250 則，單則約 4KB。共用同一個熱點時全車一起算。</li>
+        <li><b>LRCLIB</b>（同步歌詞）：免費、不用金鑰，沒有公布額度；尖峰時常被限流，會自動等待重試。</li>
+      </ul>
     </details>
   </aside>
 </div>
@@ -1272,12 +1282,13 @@ h2 .mono { color: var(--accent); }
       return [el('button', { type: 'button', class: 'more-recs', disabled: recState === 'loading' || recState === 'empty' ? '' : null, onclick: loadRecs }, label)];
     }
 
-    function send(items) {
+    function send(items, front) {
       if (busy || !items.length) return;
       busy = true;
-      Promise.resolve(opts.onAdd(items)).then(function () {
+      Promise.resolve(opts.onAdd(items, !!front)).then(function () {
         items.forEach(function (it) { delete sel[it.id]; });
-        toast(items.length > 1 ? '已點 ' + items.length + ' 首' : '已點「' + items[0].title + '」');
+        var verb = front ? '已插播' : '已點';
+        toast(items.length > 1 ? verb + ' ' + items.length + ' 首' : verb + '「' + items[0].title + '」');
         render();
       }).catch(function (e) {
         // 分批送到一半失敗：已送出的先取消勾選，再按一次只會送剩下的，不會重複點
@@ -1315,12 +1326,15 @@ h2 .mono { color: var(--accent); }
       }
       var add = el('button', { type: 'button', class: 'add' }, '點');
       add.addEventListener('click', function () { send([it]); });
+      // 插：排到待播第一首，下一首就播
+      var cut = el('button', { type: 'button', class: 'add cut', 'aria-label': '插播「' + it.title + '」' }, '插');
+      cut.addEventListener('click', function () { send([it], true); });
       return el('div', { class: 'result' },
         cb,
         el('label', { for: cbId, class: 'r-label' },
           el('img', { src: it.thumb || thumbOf(it.id), alt: '', loading: 'lazy' }),
           el('span', { class: 'r-meta' }, el('span', { class: 'r-title' }, it.title), el('span', { class: 'r-ch' }, it.sub || it.ch || ''))),
-        side, add);
+        side, cut, add);
     }
 
     function renderBar() {
@@ -1557,8 +1571,9 @@ h2 .mono { color: var(--accent); }
       prefix: 'h',
       hist: histPlayed, histLabel: '唱過', histEmpty: '還沒有唱過的歌，播過的歌會記在這裡。',
       key: function () { return apiKey; },
-      onAdd: function (items) {
-        items.forEach(function (it) { addSong({ id: it.id, title: it.title, ch: it.ch || '', by: '', bad: it.bad ? 1 : undefined }); });
+      onAdd: function (items, front) {
+        var base = S.now ? 0 : -1;
+        items.forEach(function (it, j) { addSong({ id: it.id, title: it.title, ch: it.ch || '', by: '', bad: it.bad ? 1 : undefined }, front, base + j); });
       }
     });
 
@@ -1694,8 +1709,12 @@ h2 .mono { color: var(--accent); }
         var dropped = songs.length - Math.max(0, room);
         if (room <= 0) { toast((by || '有人') + ' 點的歌沒加進去：' + why); return; }
         songs = songs.slice(0, room);
-        songs.forEach(addSong);
-        toast((by || '有人') + (songs.length > 1 ? ' 點了 ' + songs.length + ' 首' : ' 點了「' + songs[0].title + '」') + (dropped > 0 ? '（' + why + '，' + dropped + ' 首沒加）' : ''));
+        var front = m.front === 1;
+        // 沒有正在播的歌時，第一首會直接開始播，後面的才排進待播最前面
+        var base = S.now ? 0 : -1;
+        songs.forEach(function (s, j) { addSong(s, front, base + j); });
+        var verb = front ? ' 插播了' : ' 點了';
+        toast((by || '有人') + (songs.length > 1 ? verb + ' ' + songs.length + ' 首' : verb + '「' + songs[0].title + '」') + (dropped > 0 ? '（' + why + '，' + dropped + ' 首沒加）' : ''));
       });
     }
     var MAX_QUEUE = 100, MAX_PER_GUEST = 30;
@@ -1727,8 +1746,9 @@ h2 .mono { color: var(--accent); }
     function save() { store.set('state', { queue: S.queue, now: S.now }); }
     function changed() { save(); renderQueue(); broadcastSoon(); }
 
-    function addSong(item) {
-      S.queue.push(item);
+    // front：插播，放到待播的第 at 首（一次插好幾首時照順序排在最前面）
+    function addSong(item, front, at) {
+      if (front) S.queue.splice(Math.max(0, Math.min(at || 0, S.queue.length)), 0, item); else S.queue.push(item);
       if (!S.now) next(); else changed();
     }
 
@@ -2713,7 +2733,7 @@ h2 .mono { color: var(--accent); }
     }, 5 * 60000);
 
     // 多首會自動分批送出，每批控制在中繼服務的訊息大小上限內，且不超過主機一次收的 MAX_BATCH 首
-    function onAdd(items) {
+    function onAdd(items, front) {
       var by = $('#gName').value.trim().slice(0, 12);
       var enc = new TextEncoder(), chunks = [], cur = [];
       items.forEach(function (it) {
@@ -2729,7 +2749,9 @@ h2 .mono { color: var(--accent); }
       return chunks.reduce(function (p, chunk) {
         return p.then(function () {
           var rid = randId(12);
-          return ntfyPub(topic + '-req', { type: 'add', rid: rid, by: by, items: chunk }).then(function () {
+          var msg = { type: 'add', rid: rid, by: by, items: chunk };
+          if (front) msg.front = 1;
+          return ntfyPub(topic + '-req', msg).then(function () {
             chunk.forEach(function (x, j) {
               myKeys.push(rid.slice(0, 5) + j.toString(36));
               if (x.title) histSent.add(x); // 讀不到歌名的先不記，免得「點過」裡出現暫時標題
